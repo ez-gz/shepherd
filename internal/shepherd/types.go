@@ -1,4 +1,4 @@
-package heikou
+package shepherd
 
 import (
 	"context"
@@ -60,7 +60,7 @@ type Session struct {
 	Backend Backend
 	Prompt  string
 	// LastUserMessage is a bounded preview of the most recent message routed
-	// through Heikou. Messages typed in an attached native TUI are not observed.
+	// through Shepherd. Messages typed in an attached native TUI are not observed.
 	LastUserMessage string
 	Root            string
 	CurrentPath     string

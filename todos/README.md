@@ -1,4 +1,4 @@
-# Heikou ideas
+# Shepherd ideas
 
 This folder holds product and architecture ideas that are intentionally outside
 the current implementation. One idea gets one document so the main design does
@@ -7,9 +7,9 @@ not become an undifferentiated backlog.
 | Idea | Status |
 | --- | --- |
 | [Code-quality and reliability audit](code-quality-audit.md) | Active backlog |
-| [Heikou pilot](heikou-pilot.md) | CLI verbs and agent instructions shipped; pilot loop and UI deferred |
-| [Session history](session-history.md) | `h history` shipped for Claude; Codex parser still open |
-| [Session resume](session-resume.md) | Shipped; conversations registered automatically and `h resume` continues them |
+| [Shepherd pilot](shepherd-pilot.md) | CLI verbs and agent instructions shipped; pilot loop and UI deferred |
+| [Session history](session-history.md) | `shepherd history` shipped for Claude; Codex parser still open |
+| [Session resume](session-resume.md) | Shipped; conversations registered automatically and `shepherd resume` continues them |
 | [Composable composer modules](composer-modules.md) | Proposed |
 | [Configurable brief sources](brief-sources.md) | Shipped |
 | [What a runner exposes about what it is doing](runner-activity.md) | Transcript `activity` source shipped; Claude's per-process status file documented and unbuilt |

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zamborg/heikou/internal/heikou"
-	"github.com/zamborg/heikou/internal/workstream"
+	"github.com/ez-gz/shepherd/internal/shepherd"
+	"github.com/ez-gz/shepherd/internal/workstream"
 )
 
 // startingSupervisor accepts every launch and records what it was asked to run,
@@ -17,20 +17,20 @@ import (
 type startingSupervisor struct {
 	fakeSupervisor
 	mu       sync.Mutex
-	requests []heikou.StartRequest
+	requests []shepherd.StartRequest
 }
 
 func newStartingSupervisor() *startingSupervisor {
 	supervisor := &startingSupervisor{}
-	supervisor.start = func(request heikou.StartRequest) (heikou.Session, error) {
+	supervisor.start = func(request shepherd.StartRequest) (shepherd.Session, error) {
 		supervisor.mu.Lock()
 		supervisor.requests = append(supervisor.requests, request)
 		supervisor.mu.Unlock()
 
-		session := heikou.Session{
-			ID: request.ID, Name: "h-" + request.ID, Backend: request.Backend,
+		session := shepherd.Session{
+			ID: request.ID, Name: "shepherd-" + request.ID, Backend: request.Backend,
 			Prompt: request.Prompt, Root: request.Root,
-			Status: heikou.StatusLive, StartedAt: time.Now(),
+			Status: shepherd.StatusLive, StartedAt: time.Now(),
 		}
 		supervisor.fakeSupervisor.mu.Lock()
 		supervisor.sessions = append(supervisor.sessions, session)
@@ -40,7 +40,7 @@ func newStartingSupervisor() *startingSupervisor {
 	return supervisor
 }
 
-func (s *startingSupervisor) lastRequest(t *testing.T) heikou.StartRequest {
+func (s *startingSupervisor) lastRequest(t *testing.T) shepherd.StartRequest {
 	t.Helper()
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -58,10 +58,10 @@ func conversationController(t *testing.T, resolver ConversationResolver) (*Contr
 	if resolver != nil {
 		options = append(options, WithConversationResolver(resolver))
 	}
-	return New(supervisor, repository, "heikou-test", options...), supervisor, repository
+	return New(supervisor, repository, "shepherd-test", options...), supervisor, repository
 }
 
-func mustStart(t *testing.T, controller *Controller, backend heikou.Backend, prompt string) Session {
+func mustStart(t *testing.T, controller *Controller, backend shepherd.Backend, prompt string) Session {
 	t.Helper()
 	session, err := controller.Start(context.Background(), StartRequest{
 		Backend: backend, Prompt: prompt, Root: t.TempDir(),
@@ -72,13 +72,13 @@ func mustStart(t *testing.T, controller *Controller, backend heikou.Backend, pro
 	return session
 }
 
-// Heikou launches Claude as `claude --session-id <durable id>`, so the
+// Shepherd launches Claude as `claude --session-id <durable id>`, so the
 // conversation is known the moment the launch succeeds. Registering it from
-// what Heikou passed — rather than by looking for a file Claude may not have
+// what Shepherd passed — rather than by looking for a file Claude may not have
 // written yet — is what makes this certain instead of racy.
 func TestAClaudeLaunchRegistersItsConversationWithoutAskingAnyone(t *testing.T) {
 	controller, _, repository := conversationController(t, ConversationResolver(nil))
-	session := mustStart(t, controller, heikou.BackendClaude, "start the work")
+	session := mustStart(t, controller, shepherd.BackendClaude, "start the work")
 
 	state, err := repository.Load(context.Background())
 	if err != nil {
@@ -104,11 +104,11 @@ func TestAClaudeLaunchRegistersItsConversationWithoutAskingAnyone(t *testing.T) 
 }
 
 // Codex has no flag for choosing a session id, so a fresh Codex launch has no
-// conversation Heikou can state. Recording one anyway — the durable id, say —
+// conversation Shepherd can state. Recording one anyway — the durable id, say —
 // would be a value that resumes nothing while looking exactly like one that does.
 func TestACodexLaunchRegistersNothingBecauseCodexNamesItsOwnConversation(t *testing.T) {
 	controller, _, repository := conversationController(t, ConversationResolver(nil))
-	session := mustStart(t, controller, heikou.BackendCodex, "start the work")
+	session := mustStart(t, controller, shepherd.BackendCodex, "start the work")
 
 	state, err := repository.Load(context.Background())
 	if err != nil {
@@ -124,13 +124,13 @@ func TestRegisteringACodexConversationRecordsItAsObserved(t *testing.T) {
 	calls := 0
 	resolver := ResolveConversationFunc(func(_ context.Context, record workstream.SessionRecord) (string, error) {
 		calls++
-		if record.Backend != heikou.BackendCodex {
+		if record.Backend != shepherd.BackendCodex {
 			t.Fatalf("resolver asked about runner %q", record.Backend)
 		}
 		return "019e6d0c-14bd-7792-91d2-f684a8dc6e80", nil
 	})
 	controller, _, repository := conversationController(t, resolver)
-	session := mustStart(t, controller, heikou.BackendCodex, "start the work")
+	session := mustStart(t, controller, shepherd.BackendCodex, "start the work")
 
 	conversation, err := controller.RegisterConversation(context.Background(), session.ID)
 	if err != nil {
@@ -166,7 +166,7 @@ func TestRegisteringACodexConversationRecordsItAsObserved(t *testing.T) {
 }
 
 // A Claude session already carries its conversation, so registering it must not
-// reach the resolver at all. Consulting the filesystem for something Heikou
+// reach the resolver at all. Consulting the filesystem for something Shepherd
 // chose is how a certainty quietly becomes an inference.
 func TestRegisteringAClaudeConversationNeverConsultsTheResolver(t *testing.T) {
 	resolver := ResolveConversationFunc(func(context.Context, workstream.SessionRecord) (string, error) {
@@ -174,7 +174,7 @@ func TestRegisteringAClaudeConversationNeverConsultsTheResolver(t *testing.T) {
 		return "", nil
 	})
 	controller, _, _ := conversationController(t, resolver)
-	session := mustStart(t, controller, heikou.BackendClaude, "start the work")
+	session := mustStart(t, controller, shepherd.BackendClaude, "start the work")
 
 	conversation, err := controller.RegisterConversation(context.Background(), session.ID)
 	if err != nil {
@@ -194,7 +194,7 @@ func TestAnUnresolvableConversationIsNotRecorded(t *testing.T) {
 		return "", refusal
 	})
 	controller, _, repository := conversationController(t, resolver)
-	session := mustStart(t, controller, heikou.BackendCodex, "start the work")
+	session := mustStart(t, controller, shepherd.BackendCodex, "start the work")
 
 	if _, err := controller.RegisterConversation(context.Background(), session.ID); !errors.Is(err, refusal) {
 		t.Fatalf("error = %v, want the resolver's refusal", err)
@@ -214,7 +214,7 @@ func TestAnEmptyResolvedConversationIsRejected(t *testing.T) {
 		return "   ", nil
 	})
 	controller, _, _ := conversationController(t, resolver)
-	session := mustStart(t, controller, heikou.BackendCodex, "start the work")
+	session := mustStart(t, controller, shepherd.BackendCodex, "start the work")
 
 	if _, err := controller.RegisterConversation(context.Background(), session.ID); err == nil {
 		t.Fatal("an empty conversation id was accepted")
@@ -223,7 +223,7 @@ func TestAnEmptyResolvedConversationIsRejected(t *testing.T) {
 
 func TestANoAgentSessionHasNoConversationToRegister(t *testing.T) {
 	controller, _, _ := conversationController(t, ConversationResolver(nil))
-	session := mustStart(t, controller, heikou.BackendNoAgent, "just a shell")
+	session := mustStart(t, controller, shepherd.BackendNoAgent, "just a shell")
 
 	_, err := controller.RegisterConversation(context.Background(), session.ID)
 	if err == nil || !strings.Contains(err.Error(), "plain shell") {
@@ -236,7 +236,7 @@ func TestANoAgentSessionHasNoConversationToRegister(t *testing.T) {
 // that conversation rather than given a fresh one.
 func TestResumeStartsANewSessionCarryingTheOriginalConversation(t *testing.T) {
 	controller, supervisor, repository := conversationController(t, ConversationResolver(nil))
-	original := mustStart(t, controller, heikou.BackendClaude, "start the work")
+	original := mustStart(t, controller, shepherd.BackendClaude, "start the work")
 
 	resumed, err := controller.ResumeSession(context.Background(), original.ID, "carry on")
 	if err != nil {
@@ -281,7 +281,7 @@ func TestResumingCodexResolvesFirstThenCarriesTheIdItFound(t *testing.T) {
 		return "019e6d0c-14bd-7792-91d2-f684a8dc6e80", nil
 	})
 	controller, supervisor, repository := conversationController(t, resolver)
-	original := mustStart(t, controller, heikou.BackendCodex, "start the work")
+	original := mustStart(t, controller, shepherd.BackendCodex, "start the work")
 
 	resumed, err := controller.ResumeSession(context.Background(), original.ID, "carry on")
 	if err != nil {
@@ -313,7 +313,7 @@ func TestResumeRefusesWhenTheConversationCannotBeEstablished(t *testing.T) {
 		return "", errors.New("no rollout matches this launch")
 	})
 	controller, supervisor, _ := conversationController(t, resolver)
-	original := mustStart(t, controller, heikou.BackendCodex, "start the work")
+	original := mustStart(t, controller, shepherd.BackendCodex, "start the work")
 	started := len(supervisor.requests)
 
 	if _, err := controller.ResumeSession(context.Background(), original.ID, "carry on"); err == nil {
@@ -326,7 +326,7 @@ func TestResumeRefusesWhenTheConversationCannotBeEstablished(t *testing.T) {
 
 func TestResumeRequiresADurableSessionAndAPrompt(t *testing.T) {
 	controller, _, _ := conversationController(t, ConversationResolver(nil))
-	session := mustStart(t, controller, heikou.BackendClaude, "start the work")
+	session := mustStart(t, controller, shepherd.BackendClaude, "start the work")
 
 	if _, err := controller.ResumeSession(context.Background(), session.ID, "  "); err == nil {
 		t.Fatal("an empty resume prompt was accepted")
@@ -355,9 +355,9 @@ func TestASessionNamesTheConversationItsTranscriptIsFiledUnder(t *testing.T) {
 			}},
 			want: conversation,
 		},
-		// An observed id is the one Heikou matched against a file the runner
+		// An observed id is the one Shepherd matched against a file the runner
 		// wrote, which makes it the better answer to "which file", not a worse
-		// one. Source separates what Heikou caused from what it inferred; it
+		// one. Source separates what Shepherd caused from what it inferred; it
 		// does not rank ids by how well they name a path.
 		"an observed registration is used just the same": {
 			record: workstream.SessionRecord{ID: durable, Conversation: &workstream.Conversation{
@@ -381,7 +381,7 @@ func TestASessionNamesTheConversationItsTranscriptIsFiledUnder(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			session := Session{ID: durable, Backend: heikou.BackendClaude, Record: test.record}
+			session := Session{ID: durable, Backend: shepherd.BackendClaude, Record: test.record}
 			if got := session.ConversationID(); got != test.want {
 				t.Fatalf("ConversationID() = %q, want %q", got, test.want)
 			}

@@ -9,14 +9,14 @@ STATICCHECK ?= honnef.co/go/tools/cmd/staticcheck@2025.1.1
 
 build:
 	mkdir -p bin
-	$(GO) build -o bin/h ./cmd/h
+	$(GO) build -o bin/shepherd ./cmd/shepherd
 
 install:
 	mkdir -p "$(BIN_DIR)"
-	$(GO) build -o "$(BIN_DIR)/heikou" ./cmd/h
-	ln -sf heikou "$(BIN_DIR)/h"
-	ln -sf heikou "$(BIN_DIR)/H"
-	@printf '\nNext: run h doctor, then h quickstart\n'
+	$(GO) build -o "$(BIN_DIR)/shepherd" ./cmd/shepherd
+	ln -sf shepherd "$(BIN_DIR)/s"
+	ln -sf shepherd "$(BIN_DIR)/S"
+	@printf '\nNext: run shepherd doctor, then shepherd quickstart\n'
 
 test:
 	$(GO) test ./...
@@ -24,7 +24,7 @@ test:
 # The end-to-end suite needs tmux, and skips itself without it. Requiring it
 # here means `make race` cannot quietly cover less than it appears to.
 race:
-	HEIKOU_TEST_REQUIRE_TMUX=1 $(GO) test -race ./...
+	SHEPHERD_TEST_REQUIRE_TMUX=1 $(GO) test -race ./...
 
 fmt:
 	$(GO) fmt ./...
@@ -54,4 +54,4 @@ version-check:
 check: fmt-check tidy-check vet staticcheck version-check test race build
 
 clean:
-	rm -f bin/h
+	rm -f bin/shepherd

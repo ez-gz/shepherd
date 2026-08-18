@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zamborg/heikou/internal/env"
-	"github.com/zamborg/heikou/internal/heikou"
+	"github.com/ez-gz/shepherd/internal/env"
+	"github.com/ez-gz/shepherd/internal/shepherd"
 )
 
 func TestMissingSettingsUseDefaults(t *testing.T) {
@@ -18,10 +18,10 @@ func TestMissingSettingsUseDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if settings.DefaultRunner != heikou.BackendCodex {
+	if settings.DefaultRunner != shepherd.BackendCodex {
 		t.Fatalf("default runner = %q", settings.DefaultRunner)
 	}
-	if got := settings.Command(heikou.BackendClaude); !slices.Equal(got, []string{"claude"}) {
+	if got := settings.Command(shepherd.BackendClaude); !slices.Equal(got, []string{"claude"}) {
 		t.Fatalf("claude command = %#v", got)
 	}
 	if got := settings.ComposerKeys; got != (ComposerKeys{
@@ -203,9 +203,9 @@ func TestSettingsRejectInvalidComposerKeys(t *testing.T) {
 }
 
 // Reserving the rest of the dashboard's chords means a settings file that was
-// loading yesterday can stop loading today, and Heikou refuses to start rather
+// loading yesterday can stop loading today, and Shepherd refuses to start rather
 // than dropping the binding. The whole cost of that is carried by this message,
-// so it has to name the key, say what Heikou already does with it, and say what
+// so it has to name the key, say what Shepherd already does with it, and say what
 // deleting the field falls back to.
 func TestReservedComposerKeyErrorExplainsTheClash(t *testing.T) {
 	clearSettingsEnvironment(t)
@@ -279,7 +279,7 @@ func TestDefaultComposerKeysAreNotReserved(t *testing.T) {
 		"cycle_root":   defaults.CycleRoot,
 	} {
 		if _, _, taken := reservedComposerKeyUse(key); taken {
-			t.Errorf("default %s binding %q is reserved by Heikou", name, key)
+			t.Errorf("default %s binding %q is reserved by Shepherd", name, key)
 		}
 	}
 }
@@ -301,11 +301,11 @@ func TestSettingsLoadArgvWithoutShellInterpretation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if settings.DefaultRunner != heikou.BackendNoAgent {
+	if settings.DefaultRunner != shepherd.BackendNoAgent {
 		t.Fatalf("default runner = %q", settings.DefaultRunner)
 	}
 	want := []string{"/a path/codex", "--flag", "", "$(touch nope)", "日本語"}
-	if got := settings.Command(heikou.BackendCodex); !slices.Equal(got, want) {
+	if got := settings.Command(shepherd.BackendCodex); !slices.Equal(got, want) {
 		t.Fatalf("codex command = %#v, want %#v", got, want)
 	}
 }
@@ -348,11 +348,11 @@ func TestEnvironmentOverridesExecutableAndDefaultOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if settings.DefaultRunner != heikou.BackendClaude {
+	if settings.DefaultRunner != shepherd.BackendClaude {
 		t.Fatalf("default runner = %q", settings.DefaultRunner)
 	}
 	want := []string{"/custom/claude", "--flag"}
-	if got := settings.Command(heikou.BackendClaude); !slices.Equal(got, want) {
+	if got := settings.Command(shepherd.BackendClaude); !slices.Equal(got, want) {
 		t.Fatalf("claude command = %#v, want %#v", got, want)
 	}
 }

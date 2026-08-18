@@ -11,7 +11,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/zamborg/heikou/internal/workstream"
+	"github.com/ez-gz/shepherd/internal/workstream"
 )
 
 const (

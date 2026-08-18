@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zamborg/heikou/internal/config"
-	"github.com/zamborg/heikou/internal/control"
-	"github.com/zamborg/heikou/internal/format"
-	"github.com/zamborg/heikou/internal/heikou"
-	"github.com/zamborg/heikou/internal/workstream"
+	"github.com/ez-gz/shepherd/internal/config"
+	"github.com/ez-gz/shepherd/internal/control"
+	"github.com/ez-gz/shepherd/internal/format"
+	"github.com/ez-gz/shepherd/internal/shepherd"
+	"github.com/ez-gz/shepherd/internal/workstream"
 )
 
 func TestRouteGlobalCommand(t *testing.T) {
@@ -23,11 +23,11 @@ func TestRouteGlobalCommand(t *testing.T) {
 		handled bool
 		want    string
 	}{
-		{name: "help", args: []string{"help"}, handled: true, want: "heikou — a fast dashboard"},
-		{name: "short help", args: []string{"-h"}, handled: true, want: "heikou — a fast dashboard"},
-		{name: "long help", args: []string{"--help"}, handled: true, want: "heikou — a fast dashboard"},
-		{name: "version", args: []string{"version"}, handled: true, want: "heikou " + version + "\n"},
-		{name: "long version", args: []string{"--version"}, handled: true, want: "heikou " + version + "\n"},
+		{name: "help", args: []string{"help"}, handled: true, want: "shepherd — a fast dashboard"},
+		{name: "short help", args: []string{"-h"}, handled: true, want: "shepherd — a fast dashboard"},
+		{name: "long help", args: []string{"--help"}, handled: true, want: "shepherd — a fast dashboard"},
+		{name: "version", args: []string{"version"}, handled: true, want: "shepherd " + version + "\n"},
+		{name: "long version", args: []string{"--version"}, handled: true, want: "shepherd " + version + "\n"},
 		{name: "dashboard", handled: false},
 		{name: "dashboard flag", args: []string{"--runner", "no-agent"}, handled: false},
 	}
@@ -57,7 +57,7 @@ func TestRunRoutesLongVersionBeforeDashboardFlags(t *testing.T) {
 	if err := application.run([]string{"--version"}); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := output.String(), "heikou "+version+"\n"; got != want {
+	if got, want := output.String(), "shepherd "+version+"\n"; got != want {
 		t.Fatalf("run(--version) = %q, want %q", got, want)
 	}
 }
@@ -71,7 +71,7 @@ func TestReadmeInstallsTheLatestRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "go install github.com/zamborg/heikou/cmd/h@latest"; !strings.Contains(string(readme), want) {
+	if want := "go install github.com/ez-gz/shepherd/cmd/shepherd@latest"; !strings.Contains(string(readme), want) {
 		t.Fatalf("README install command is not %q", want)
 	}
 }
@@ -89,8 +89,8 @@ func TestHelpAdvertisesQuickstart(t *testing.T) {
 	var output bytes.Buffer
 	printHelp(&output)
 	for _, want := range []string{
-		"h quickstart [-r claude|codex] [-C DIR]",
-		"h list [--json]",
+		"shepherd quickstart [-r claude|codex] [-C DIR]",
+		"shepherd list [--json]",
 		"Ctrl-G            resize snapshot/context",
 		"Ctrl-R            rename a workstream or edit/clear a session title",
 		"Ctrl-T            mark a session; Ctrl-T on a workstream moves or adopts it",
@@ -105,13 +105,13 @@ func TestHelpAdvertisesQuickstart(t *testing.T) {
 
 func TestQuickstartBackendPrefersClaudeAndRejectsNoAgent(t *testing.T) {
 	settings := config.Default()
-	settings.Commands[string(heikou.BackendClaude)] = []string{"/bin/sh"}
-	settings.Commands[string(heikou.BackendCodex)] = []string{"/bin/sh"}
+	settings.Commands[string(shepherd.BackendClaude)] = []string{"/bin/sh"}
+	settings.Commands[string(shepherd.BackendCodex)] = []string{"/bin/sh"}
 	backend, err := quickstartBackend("", settings)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if backend != heikou.BackendClaude {
+	if backend != shepherd.BackendClaude {
 		t.Fatalf("quickstart backend = %q, want claude", backend)
 	}
 	if _, err := quickstartBackend("no-agent", settings); err == nil || !strings.Contains(err.Error(), "requires") {
@@ -121,13 +121,13 @@ func TestQuickstartBackendPrefersClaudeAndRejectsNoAgent(t *testing.T) {
 
 func TestQuickstartBackendFallsBackToCodex(t *testing.T) {
 	settings := config.Default()
-	settings.Commands[string(heikou.BackendClaude)] = []string{"/definitely/missing/heikou-claude"}
-	settings.Commands[string(heikou.BackendCodex)] = []string{"/bin/sh"}
+	settings.Commands[string(shepherd.BackendClaude)] = []string{"/definitely/missing/shepherd-claude"}
+	settings.Commands[string(shepherd.BackendCodex)] = []string{"/bin/sh"}
 	backend, err := quickstartBackend("", settings)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if backend != heikou.BackendCodex {
+	if backend != shepherd.BackendCodex {
 		t.Fatalf("quickstart fallback = %q, want codex", backend)
 	}
 	if _, err := quickstartBackend("claude", settings); err == nil {
@@ -137,7 +137,7 @@ func TestQuickstartBackendFallsBackToCodex(t *testing.T) {
 
 func TestQuickstartPromptEmbedsCanonicalSkill(t *testing.T) {
 	prompt := strings.Join(strings.Fields(quickstartPrompt()), " ")
-	for _, want := range []string{"name: learn-heikou", "If this guide itself is running inside a Heikou session", "press `Ctrl-T` to mark it", "Ctrl-b", "Ctrl-G", "Shift-Up", "Ctrl-N"} {
+	for _, want := range []string{"name: learn-shepherd", "If this guide itself is running inside a Shepherd session", "press `Ctrl-T` to mark it", "Ctrl-b", "Ctrl-G", "Shift-Up", "Ctrl-N"} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("quickstart prompt is missing %q", want)
 		}
@@ -175,14 +175,14 @@ func TestSupportedTmuxVersion(t *testing.T) {
 
 func TestResolveWorkstreamByNameAndRejectAmbiguity(t *testing.T) {
 	snapshot := control.Snapshot{Workstreams: []workstream.Workstream{
-		{ID: "018f0000-0000-4000-8000-000000000001", Name: "Heikou Core"},
-		{ID: "018f0000-0000-4000-8000-000000000002", Name: "Heikou Docs"},
+		{ID: "018f0000-0000-4000-8000-000000000001", Name: "Shepherd Core"},
+		{ID: "018f0000-0000-4000-8000-000000000002", Name: "Shepherd Docs"},
 	}}
-	id, err := resolveWorkstream(snapshot, "heikou core")
+	id, err := resolveWorkstream(snapshot, "shepherd core")
 	if err != nil || id != snapshot.Workstreams[0].ID {
 		t.Fatalf("exact name resolution = (%q, %v)", id, err)
 	}
-	if _, err := resolveWorkstream(snapshot, "hei"); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+	if _, err := resolveWorkstream(snapshot, "she"); err == nil || !strings.Contains(err.Error(), "ambiguous") {
 		t.Fatalf("ambiguous prefix error = %v", err)
 	}
 }
@@ -200,15 +200,15 @@ func TestOneLineStripsTerminalControlSequences(t *testing.T) {
 func TestMachineSnapshotIncludesDurableTitleAndHonestUnknownExit(t *testing.T) {
 	id := "018f0000-0000-4000-8000-000000000081"
 	workstreamID := "018f0000-0000-4000-8000-000000000082"
-	runtime := heikou.Session{
-		ID: id, Name: "h-" + id, Backend: heikou.BackendCodex,
-		Status: heikou.StatusExited, ExitCode: nil, StartedAt: time.Now().Add(-time.Minute),
+	runtime := shepherd.Session{
+		ID: id, Name: "shepherd-" + id, Backend: shepherd.BackendCodex,
+		Status: shepherd.StatusExited, ExitCode: nil, StartedAt: time.Now().Add(-time.Minute),
 	}
 	snapshot := control.Snapshot{
 		Revision:    9,
 		Workstreams: []workstream.Workstream{{ID: workstreamID, Name: "Release", Roots: []string{"/tmp"}}},
 		Sessions: []control.Session{{
-			ID: id, Backend: heikou.BackendCodex, Prompt: "initial task", LastUserMessage: "latest follow-up",
+			ID: id, Backend: shepherd.BackendCodex, Prompt: "initial task", LastUserMessage: "latest follow-up",
 			Root: "/tmp", WorkstreamID: workstreamID, Status: control.StatusExited, Durable: true,
 			Record: workstream.SessionRecord{ID: id, Title: "Ship macOS build"}, Runtime: &runtime,
 		}},
@@ -219,7 +219,7 @@ func TestMachineSnapshotIncludesDurableTitleAndHonestUnknownExit(t *testing.T) {
 		t.Fatalf("machine sessions = %#v", machine.Sessions)
 	}
 	session := machine.Sessions[0]
-	if session.Title != "Ship macOS build" || session.DisplayTitle != session.Title || session.LatestViaHeikou != "latest follow-up" {
+	if session.Title != "Ship macOS build" || session.DisplayTitle != session.Title || session.LatestViaShepherd != "latest follow-up" {
 		t.Fatalf("machine title projection = %#v", session)
 	}
 	if session.ExitCode != nil || session.State != "exited" {
@@ -253,12 +253,12 @@ func TestMachineSnapshotIncludesDurableTitleAndHonestUnknownExit(t *testing.T) {
 func TestMachineSnapshotKeepsStateStableWhenExitCodeIsNonzero(t *testing.T) {
 	code := 7
 	id := "018f0000-0000-4000-8000-000000000083"
-	runtime := heikou.Session{
-		ID: id, Backend: heikou.BackendCodex, Status: heikou.StatusFailed,
+	runtime := shepherd.Session{
+		ID: id, Backend: shepherd.BackendCodex, Status: shepherd.StatusFailed,
 		ExitCode: &code, StartedAt: time.Now().Add(-time.Minute),
 	}
 	machine := newCLISnapshot(control.Snapshot{Sessions: []control.Session{{
-		ID: id, Backend: heikou.BackendCodex, Prompt: "failing task", Root: "/tmp",
+		ID: id, Backend: shepherd.BackendCodex, Prompt: "failing task", Root: "/tmp",
 		Status: control.StatusExited, Durable: true, Runtime: &runtime,
 	}}})
 	if len(machine.Sessions) != 1 {

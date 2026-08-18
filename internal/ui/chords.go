@@ -1,6 +1,6 @@
 package ui
 
-// boundChords is every key Heikou itself answers to: the dashboard, the help
+// boundChords is every key Shepherd itself answers to: the dashboard, the help
 // and settings screens, resize mode, and the composer's editing chords.
 //
 // It exists because binding a chord in a key switch and reserving it in
@@ -39,7 +39,7 @@ var boundChords = []string{
 	"enter", "e", "r",
 
 	// Composer editing. Several chords are aliases for one action because the
-	// terminal decides which modifier combinations reach Heikou at all.
+	// terminal decides which modifier combinations reach Shepherd at all.
 	"alt+b", "alt+backspace", "alt+delete", "alt+enter", "alt+f", "alt+left",
 	"alt+right", "backspace", "ctrl+a", "ctrl+b", "ctrl+d", "ctrl+e", "ctrl+end",
 	"ctrl+f", "ctrl+h", "ctrl+home", "ctrl+j", "ctrl+k", "ctrl+left", "ctrl+p",

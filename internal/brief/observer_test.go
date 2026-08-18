@@ -10,15 +10,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zamborg/heikou/internal/config"
-	"github.com/zamborg/heikou/internal/control"
-	"github.com/zamborg/heikou/internal/heikou"
+	"github.com/ez-gz/shepherd/internal/config"
+	"github.com/ez-gz/shepherd/internal/control"
+	"github.com/ez-gz/shepherd/internal/shepherd"
 )
 
 func observerSession(id string, activity time.Time) control.Session {
-	runtime := heikou.Session{ID: id, Status: heikou.StatusLive, LastActivityAt: activity}
+	runtime := shepherd.Session{ID: id, Status: shepherd.StatusLive, LastActivityAt: activity}
 	return control.Session{
-		ID: id, Backend: heikou.BackendClaude, Prompt: "task", Root: "/tmp/project",
+		ID: id, Backend: shepherd.BackendClaude, Prompt: "task", Root: "/tmp/project",
 		Status: control.StatusLive, Durable: true, Runtime: &runtime,
 	}
 }
@@ -240,11 +240,11 @@ func TestSessionEnvironmentWithholdsPromptsAndMessages(t *testing.T) {
 		t.Fatalf("session content leaked into a brief source's environment:\n%s", joined)
 	}
 	for _, want := range []string{
-		"HEIKOU_SESSION_ID=018f0000-0000-4000-8000-000000000001",
-		"HEIKOU_SESSION_RUNNER=claude",
-		"HEIKOU_SESSION_STATE=live",
-		"HEIKOU_SESSION_ROOT=/tmp/project",
-		"HEIKOU_SESSION_TITLE=OAuth work",
+		"SHEPHERD_SESSION_ID=018f0000-0000-4000-8000-000000000001",
+		"SHEPHERD_SESSION_RUNNER=claude",
+		"SHEPHERD_SESSION_STATE=live",
+		"SHEPHERD_SESSION_ROOT=/tmp/project",
+		"SHEPHERD_SESSION_TITLE=OAuth work",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("environment is missing %q", want)
@@ -252,7 +252,7 @@ func TestSessionEnvironmentWithholdsPromptsAndMessages(t *testing.T) {
 	}
 }
 
-// A layout that names only sources Heikou already has the answers for must not
+// A layout that names only sources Shepherd already has the answers for must not
 // schedule a pass at all. This is what keeps the observer off the clock for
 // someone who has turned the activity source off.
 func TestObserverRunsNothingForALayoutThatAsksNothing(t *testing.T) {
@@ -313,7 +313,7 @@ func TestObserverRunsARealCommandAndUsesItsOutput(t *testing.T) {
 	observer := NewObserver(config.BriefConfig{
 		Lead: []string{"status"},
 		Sources: map[string]config.BriefSourceConfig{
-			"status": {Command: []string{"sh", "-c", `printf '%s is %s\n' "$HEIKOU_SESSION_RUNNER" "$HEIKOU_SESSION_STATE"`},
+			"status": {Command: []string{"sh", "-c", `printf '%s is %s\n' "$SHEPHERD_SESSION_RUNNER" "$SHEPHERD_SESSION_STATE"`},
 				IntervalSeconds: 10, TimeoutSeconds: 5},
 		},
 	})

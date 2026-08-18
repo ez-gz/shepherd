@@ -13,11 +13,11 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/zamborg/heikou/internal/config"
-	"github.com/zamborg/heikou/internal/control"
-	"github.com/zamborg/heikou/internal/env"
-	"github.com/zamborg/heikou/internal/format"
-	"github.com/zamborg/heikou/internal/transcript"
+	"github.com/ez-gz/shepherd/internal/config"
+	"github.com/ez-gz/shepherd/internal/control"
+	"github.com/ez-gz/shepherd/internal/env"
+	"github.com/ez-gz/shepherd/internal/format"
+	"github.com/ez-gz/shepherd/internal/transcript"
 )
 
 const (
@@ -143,7 +143,7 @@ func (o *Observer) candidates(session control.Session) []pendingRun {
 //
 // A source that found nothing still records an empty observation. Storing it is
 // what makes the interval apply to a source that will keep finding nothing —
-// a Codex session whose rollout Heikou cannot identify, say — instead of
+// a Codex session whose rollout Shepherd cannot identify, say — instead of
 // letting it come due on every pass and spend the per-pass cap forever.
 func (o *Observer) Observe(ctx context.Context, sessions []control.Session, previous Observations) (Observations, Report) {
 	next := make(Observations, len(previous))
@@ -259,7 +259,7 @@ func (o *Observer) commandObserver(settings config.BriefSourceConfig) func(conte
 // observeActivity reads the tail of the transcript the runner writes and
 // phrases the last record as a line.
 //
-// A runner with no transcript Heikou can locate, and a session whose transcript
+// A runner with no transcript Shepherd can locate, and a session whose transcript
 // has not been written yet, both produce empty text rather than an error. That
 // is the ordinary case for Codex and for a session in its first second, and it
 // is not a failure to report: the slot falls through to the next source.
@@ -271,7 +271,7 @@ func (o *Observer) observeActivity(ctx context.Context, session control.Session)
 		return "", err
 	}
 	// The transcript is filed under the runner's conversation id, which is the
-	// durable session id only for a session Heikou launched fresh. A resumed
+	// durable session id only for a session Shepherd launched fresh. A resumed
 	// session asked for by its own id would look for a file Claude never wrote,
 	// and pay the fallback scan for it on every pass.
 	item, err := o.reader.ReadActivity(transcript.Request{
@@ -318,7 +318,7 @@ func runCommand(ctx context.Context, argv, environment []string) ([]byte, error)
 
 // boundedBuffer keeps a runaway command from filling memory. Writes past the
 // limit are reported as accepted and discarded, so the child is not killed by a
-// short-write error partway through producing output Heikou would not use.
+// short-write error partway through producing output Shepherd would not use.
 type boundedBuffer struct {
 	buffer bytes.Buffer
 	limit  int

@@ -31,7 +31,7 @@ workstream, which is plain `MoveSession` and needs nothing new.
 2. A state version bump and a migration that assigns initial positions from
    `JoinedAt`, so existing installations keep their current visible order.
 3. A `ReorderSessionAction` on the command plane with the same validation and
-   revision discipline as `ReorderWorkstreamAction`, plus an `h` verb for it so
+   revision discipline as `ReorderWorkstreamAction`, plus an `shepherd` verb for it so
    the CLI surface stays complete.
 4. A tie-break rule for sessions that arrive while a reorder is in flight.
 

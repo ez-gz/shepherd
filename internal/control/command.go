@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/zamborg/heikou/internal/heikou"
-	"github.com/zamborg/heikou/internal/workstream"
+	"github.com/ez-gz/shepherd/internal/shepherd"
+	"github.com/ez-gz/shepherd/internal/workstream"
 )
 
 // ActorKind identifies who requested a controller mutation. Manager mode will
@@ -49,7 +49,7 @@ func WorkstreamScope(id string) Scope {
 type Action interface{ commandAction() }
 
 type StartAction struct {
-	Backend heikou.Backend
+	Backend shepherd.Backend
 	Prompt  string
 	Root    string
 }
@@ -67,7 +67,7 @@ type ResumeSessionAction struct {
 
 func (ResumeSessionAction) commandAction() {}
 
-// RegisterConversationAction asks Heikou to learn the conversation id a runner
+// RegisterConversationAction asks Shepherd to learn the conversation id a runner
 // minted for a session it could not name at launch.
 //
 // It deliberately carries no id and no provenance. A caller that could supply
@@ -191,18 +191,18 @@ func (localHumanAuthorizer) Authorize(_ context.Context, command Command) error 
 // CommandResolver supplies a trusted, snapshotted argv prefix for new native
 // runners. Callers choose a backend, never executable argv.
 type CommandResolver interface {
-	Resolve(context.Context, heikou.Backend) ([]string, error)
+	Resolve(context.Context, shepherd.Backend) ([]string, error)
 }
 
-type ResolveCommandFunc func(context.Context, heikou.Backend) ([]string, error)
+type ResolveCommandFunc func(context.Context, shepherd.Backend) ([]string, error)
 
-func (f ResolveCommandFunc) Resolve(ctx context.Context, backend heikou.Backend) ([]string, error) {
+func (f ResolveCommandFunc) Resolve(ctx context.Context, backend shepherd.Backend) ([]string, error) {
 	return f(ctx, backend)
 }
 
 // ConversationResolver discovers the conversation id a runner minted for a
-// session Heikou could not name at launch. It is an interface here, and
-// implemented over runner-written files in cmd/h, for the same reason
+// session Shepherd could not name at launch. It is an interface here, and
+// implemented over runner-written files in cmd/shepherd, for the same reason
 // CommandResolver is: the controller owns the policy — what may be recorded and
 // with what provenance — while reading another program's files stays outside it.
 //

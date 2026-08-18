@@ -8,14 +8,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zamborg/heikou/internal/heikou"
+	"github.com/ez-gz/shepherd/internal/shepherd"
 )
 
 func TestHumanWrappersUseCommandAuthorizationBoundary(t *testing.T) {
 	repository := newMemoryRepository(t.TempDir())
 	want := errors.New("policy denied")
 	var observed Command
-	controller := New(&fakeSupervisor{}, repository, "heikou-test", WithAuthorizer(AuthorizeFunc(
+	controller := New(&fakeSupervisor{}, repository, "shepherd-test", WithAuthorizer(AuthorizeFunc(
 		func(_ context.Context, command Command) error {
 			observed = command
 			return want
@@ -48,7 +48,7 @@ func TestArchiveWorkstreamCrossesTheCommandBoundaryScopedToItsWorkstream(t *test
 	root := t.TempDir()
 	repository := newMemoryRepository(root)
 	var observed Command
-	controller := New(&fakeSupervisor{}, repository, "heikou-test", WithAuthorizer(AuthorizeFunc(
+	controller := New(&fakeSupervisor{}, repository, "shepherd-test", WithAuthorizer(AuthorizeFunc(
 		func(_ context.Context, command Command) error {
 			observed = command
 			return nil
@@ -80,16 +80,16 @@ func TestSessionActorUsesTypedScopeAndTrustedCommandResolver(t *testing.T) {
 	root := t.TempDir()
 	repository := newMemoryRepository(root)
 	var observed Command
-	var launched heikou.StartRequest
+	var launched shepherd.StartRequest
 	resolved := []string{"/trusted/codex", "--fixed-flag"}
 	supervisor := &fakeSupervisor{}
-	controller := New(supervisor, repository, "heikou-test",
+	controller := New(supervisor, repository, "shepherd-test",
 		WithAuthorizer(AuthorizeFunc(func(_ context.Context, command Command) error {
 			observed = command
 			return nil
 		})),
-		WithCommandResolver(ResolveCommandFunc(func(_ context.Context, backend heikou.Backend) ([]string, error) {
-			if backend != heikou.BackendCodex {
+		WithCommandResolver(ResolveCommandFunc(func(_ context.Context, backend shepherd.Backend) ([]string, error) {
+			if backend != shepherd.BackendCodex {
 				t.Fatalf("resolver backend = %q", backend)
 			}
 			return append([]string(nil), resolved...), nil
@@ -100,11 +100,11 @@ func TestSessionActorUsesTypedScopeAndTrustedCommandResolver(t *testing.T) {
 		t.Fatal(err)
 	}
 	actorID := "018f0000-0000-4000-8000-000000000071"
-	supervisor.start = func(request heikou.StartRequest) (heikou.Session, error) {
+	supervisor.start = func(request shepherd.StartRequest) (shepherd.Session, error) {
 		launched = request
-		return heikou.Session{
-			ID: request.ID, Name: "h-" + request.ID, Backend: request.Backend,
-			Prompt: request.Prompt, Root: request.Root, Status: heikou.StatusLive,
+		return shepherd.Session{
+			ID: request.ID, Name: "shepherd-" + request.ID, Backend: request.Backend,
+			Prompt: request.Prompt, Root: request.Root, Status: shepherd.StatusLive,
 			StartedAt: time.Now(),
 		}, nil
 	}
@@ -112,7 +112,7 @@ func TestSessionActorUsesTypedScopeAndTrustedCommandResolver(t *testing.T) {
 	result, err := controller.Execute(context.Background(), Command{
 		Actor:  Actor{Kind: ActorSession, SessionID: actorID},
 		Scope:  WorkstreamScope(container.ID),
-		Action: StartAction{Backend: heikou.BackendCodex, Prompt: "build it", Root: root},
+		Action: StartAction{Backend: shepherd.BackendCodex, Prompt: "build it", Root: root},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -126,7 +126,7 @@ func TestSessionActorUsesTypedScopeAndTrustedCommandResolver(t *testing.T) {
 }
 
 func TestDefaultPolicyRejectsSessionActor(t *testing.T) {
-	controller := New(&fakeSupervisor{}, newMemoryRepository(t.TempDir()), "heikou-test")
+	controller := New(&fakeSupervisor{}, newMemoryRepository(t.TempDir()), "shepherd-test")
 	_, err := controller.Execute(context.Background(), Command{
 		Actor:  Actor{Kind: ActorSession, SessionID: "018f0000-0000-4000-8000-000000000072"},
 		Scope:  InstallationScope(),
@@ -139,7 +139,7 @@ func TestDefaultPolicyRejectsSessionActor(t *testing.T) {
 
 func TestCommandScopeValidationPrecedesAuthorization(t *testing.T) {
 	called := false
-	controller := New(&fakeSupervisor{}, newMemoryRepository(t.TempDir()), "heikou-test", WithAuthorizer(AuthorizeFunc(
+	controller := New(&fakeSupervisor{}, newMemoryRepository(t.TempDir()), "shepherd-test", WithAuthorizer(AuthorizeFunc(
 		func(context.Context, Command) error {
 			called = true
 			return nil

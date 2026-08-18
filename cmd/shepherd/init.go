@@ -9,21 +9,21 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/zamborg/heikou/internal/format"
-	"github.com/zamborg/heikou/internal/home"
-	manageheikou "github.com/zamborg/heikou/skills/manage-heikou"
+	"github.com/ez-gz/shepherd/internal/format"
+	"github.com/ez-gz/shepherd/internal/home"
+	manageshepherd "github.com/ez-gz/shepherd/skills/manage-shepherd"
 )
 
 // claudePointer keeps one source of truth. Claude Code looks for CLAUDE.md and
 // Codex looks for AGENTS.md, so the pointer exists rather than a second copy of
 // the instructions that could drift from the first.
-const claudePointer = `# Heikou
+const claudePointer = `# Shepherd
 
 Read [AGENTS.md](AGENTS.md) in this directory. It is the operating contract for
-maintaining Heikou state, and it applies to you in full.
+maintaining Shepherd state, and it applies to you in full.
 `
 
-// pilotDoc is one file installed into the Heikou home directory.
+// pilotDoc is one file installed into the Shepherd home directory.
 type pilotDoc struct {
 	relative string
 	contents string
@@ -31,17 +31,17 @@ type pilotDoc struct {
 
 func pilotDocs() []pilotDoc {
 	return []pilotDoc{
-		{relative: "AGENTS.md", contents: manageheikou.Agents},
+		{relative: "AGENTS.md", contents: manageshepherd.Agents},
 		{relative: "CLAUDE.md", contents: claudePointer},
-		{relative: filepath.Join("skills", "manage-heikou", "SKILL.md"), contents: manageheikou.Skill},
+		{relative: filepath.Join("skills", "manage-shepherd", "SKILL.md"), contents: manageshepherd.Skill},
 	}
 }
 
 func (a *app) runInit(args []string) error {
-	flags := a.newFlagSet("h init")
+	flags := a.newFlagSet("shepherd init")
 	force := flags.Bool("force", false, "overwrite existing instruction files")
 	flags.Usage = func() {
-		fmt.Fprintln(flags.Output(), "Usage: h init [--force]")
+		fmt.Fprintln(flags.Output(), "Usage: shepherd init [--force]")
 		flags.PrintDefaults()
 	}
 	if err := flags.Parse(args); err != nil {
@@ -51,7 +51,7 @@ func (a *app) runInit(args []string) error {
 		return err
 	}
 	if flags.NArg() != 0 {
-		return errors.New("usage: h init [--force]")
+		return errors.New("usage: shepherd init [--force]")
 	}
 	dir, written, err := installPilotDocs(*force)
 	if err != nil {
@@ -64,13 +64,13 @@ func (a *app) runInit(args []string) error {
 		fmt.Fprintf(a.out, "%s already has its instructions; pass --force to refresh them\n", dir)
 	}
 
-	// h init is the explicit opt-in. An installation that already has state is
-	// never seeded implicitly, so this is how a user asks for the managers
+	// shepherd init is the explicit opt-in. An installation that already has
+	// state is never seeded implicitly, so this is how a user asks for the managers
 	// workstream, and how they get it back after deleting it.
 	if controller, err := a.dial(defaultSocket()); err == nil {
 		ctx, cancel := context.WithTimeout(context.Background(), organizeTimeout)
 		if err := reprovisionManagersWorkstream(ctx, controller, a.out); err != nil {
-			fmt.Fprintln(a.err, "heikou:", format.OneLine(err.Error()))
+			fmt.Fprintln(a.err, "shepherd:", format.OneLine(err.Error()))
 		}
 		cancel()
 	}
@@ -81,19 +81,19 @@ func (a *app) runInit(args []string) error {
 }
 
 // ensurePilotDocs installs missing instruction files on any invocation, so the
-// Heikou home directory is always ready for a pilot without the user having to
-// know that h init exists. It never overwrites, so it costs one stat per file
-// once the directory is set up.
+// Shepherd home directory is always ready for a pilot without the user having to
+// know that shepherd init exists. It never overwrites, so it costs one stat per
+// file once the directory is set up.
 //
 // A failure here is reported but not fatal: not being able to write AGENTS.md
 // is no reason to refuse to list sessions.
 func ensurePilotDocs(writer io.Writer) {
 	if _, _, err := installPilotDocs(false); err != nil {
-		fmt.Fprintln(writer, "heikou: could not install pilot instructions:", format.OneLine(err.Error()))
+		fmt.Fprintln(writer, "shepherd: could not install pilot instructions:", format.OneLine(err.Error()))
 	}
 }
 
-// installPilotDocs writes any missing instruction file into the Heikou home
+// installPilotDocs writes any missing instruction file into the Shepherd home
 // directory. Existing files are never overwritten without --force, matching how
 // settings are handled: a file the user has edited is theirs.
 func installPilotDocs(force bool) (string, []string, error) {
@@ -123,9 +123,9 @@ func installPilotDocs(force bool) (string, []string, error) {
 }
 
 // writePrivateFile installs one file atomically at mode 0600, matching how
-// Heikou writes every other file it owns.
+// Shepherd writes every other file it owns.
 func writePrivateFile(path, contents string) error {
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".heikou-*.tmp")
+	temporary, err := os.CreateTemp(filepath.Dir(path), ".shepherd-*.tmp")
 	if err != nil {
 		return fmt.Errorf("create temporary file for %q: %w", path, err)
 	}

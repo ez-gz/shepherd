@@ -1,4 +1,4 @@
-# Developing Heikou
+# Developing Shepherd
 
 Read this before pushing. It is short, and one part of it is not obvious.
 
@@ -6,13 +6,13 @@ Read this before pushing. It is short, and one part of it is not obvious.
 
 There is no build step to run before pushing, and nothing compiled is committed.
 
-Users install with `go install github.com/zamborg/heikou/cmd/h@latest`, which
+Users install with `go install github.com/ez-gz/shepherd/cmd/shepherd@latest`, which
 compiles from source **on their machine**. The repository holds no binaries, no
 generated code, and no vendored dependencies — `git grep go:generate` returns
 nothing, deliberately.
 
-That includes the agent instructions. `skills/manage-heikou/AGENTS.md`,
-`skills/manage-heikou/SKILL.md`, and `skills/learn-heikou/SKILL.md` reach the
+That includes the agent instructions. `skills/manage-shepherd/AGENTS.md`,
+`skills/manage-shepherd/SKILL.md`, and `skills/learn-shepherd/SKILL.md` reach the
 binary through `//go:embed`, which reads them **at compile time**. Editing the
 Markdown is the whole change; there is nothing to regenerate.
 
@@ -31,7 +31,7 @@ installs the previous release.
 So there is exactly one thing to remember:
 
 > **If a change should reach users, bump `version` in
-> [`cmd/h/main.go`](../cmd/h/main.go) in the same pull request.**
+> [`cmd/shepherd/main.go`](../cmd/shepherd/main.go) in the same pull request.**
 
 Merging it is what ships. The `Tag` workflow watches `main`, and when CI passes
 on a commit whose `version` has no tag yet, it creates and pushes that tag.
@@ -53,7 +53,7 @@ When he does not name one, move the third component and say so in the pull
 request. A minor bump claims the tool grew a capability worth being told about
 and a major bump claims something changed out from under existing use; both are
 claims about the product rather than about the code, so they are his to make and
-cheap for him to correct. Heikou is pre-1.0 and the third component is doing
+cheap for him to correct. Shepherd is pre-1.0 and the third component is doing
 most of the work.
 
 `make check` refuses a version that is not semver, because a version that is not
@@ -80,8 +80,8 @@ discover:
 | Target | What it does |
 | --- | --- |
 | `make check` | everything below, in CI's order |
-| `make build` | build `bin/h` |
-| `make install` | install `heikou` to `~/.local/bin` with `h` / `H` symlinks |
+| `make build` | build `bin/shepherd` |
+| `make install` | install `shepherd` to `~/.local/bin` with `s` / `S` symlinks |
 | `make fmt` | `go fmt ./...` |
 | `make fmt-check` | fail if anything is unformatted |
 | `make tidy-check` | fail if `go.mod` / `go.sum` are stale |
@@ -90,14 +90,14 @@ discover:
 | `make version-check` | version is semver, README still installs `@latest` |
 | `make test` | `go test ./...` |
 | `make race` | tests under the race detector, with tmux required |
-| `make clean` | remove `bin/h` |
+| `make clean` | remove `bin/shepherd` |
 
 Two notes on the test suites:
 
 - The tmux-dependent suites **skip themselves** when tmux is missing. Set
-  `HEIKOU_TEST_REQUIRE_TMUX=1` to turn that skip into a failure — `make race`
+  `SHEPHERD_TEST_REQUIRE_TMUX=1` to turn that skip into a failure — `make race`
   and CI both do — so a run cannot report green over a suite that never ran.
-- `go build ./cmd/...` writes an `h` binary into the working directory rather
+- `go build ./cmd/...` writes a `shepherd` binary into the working directory rather
   than `bin/`. It is gitignored, because it reached a commit once.
 
 ## What CI does

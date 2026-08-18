@@ -9,11 +9,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zamborg/heikou/internal/heikou"
+	"github.com/ez-gz/shepherd/internal/shepherd"
 )
 
 func TestCodexArgumentsUseOptionTerminator(t *testing.T) {
-	adapter, err := AdapterFor(heikou.BackendCodex)
+	adapter, err := AdapterFor(shepherd.BackendCodex)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,7 +25,7 @@ func TestCodexArgumentsUseOptionTerminator(t *testing.T) {
 }
 
 func TestClaudeArgumentsCarryStableSessionIdentity(t *testing.T) {
-	adapter, err := AdapterFor(heikou.BackendClaude)
+	adapter, err := AdapterFor(shepherd.BackendClaude)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,18 +52,18 @@ func TestResumeArgumentsNameTheConversationBeingContinued(t *testing.T) {
 		Resume:    "019e6d0c-14bd-7792-91d2-f684a8dc6e80",
 	}
 	tests := []struct {
-		backend heikou.Backend
+		backend shepherd.Backend
 		want    []string
 	}{
 		{
-			backend: heikou.BackendClaude,
+			backend: shepherd.BackendClaude,
 			want: []string{
 				"--resume", "019e6d0c-14bd-7792-91d2-f684a8dc6e80",
 				"--name", "title", "--", "--keep going",
 			},
 		},
 		{
-			backend: heikou.BackendCodex,
+			backend: shepherd.BackendCodex,
 			want:    []string{"resume", "019e6d0c-14bd-7792-91d2-f684a8dc6e80", "--", "--keep going"},
 		},
 	}
@@ -115,7 +115,7 @@ func TestCommandEncodeRoundTrip(t *testing.T) {
 
 func TestResolveCommandPreservesConfiguredArguments(t *testing.T) {
 	t.Setenv("PATH", "/bin:/usr/bin")
-	got, err := ResolveCommand(heikou.BackendClaude, []string{"/bin/sh", "--flag", "$(touch nope)"})
+	got, err := ResolveCommand(shepherd.BackendClaude, []string{"/bin/sh", "--flag", "$(touch nope)"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func TestFirstExecutableFindsAbsoluteCandidateWithRestrictedPath(t *testing.T) {
 
 func TestResolveCommandMissingRunnerNamesBackend(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
-	_, err := ResolveCommand(heikou.BackendClaude, []string{"definitely-not-a-runner"})
+	_, err := ResolveCommand(shepherd.BackendClaude, []string{"definitely-not-a-runner"})
 	if err == nil || !strings.Contains(err.Error(), "claude") || !strings.Contains(err.Error(), "definitely-not-a-runner") {
 		t.Fatalf("ResolveCommand() error = %v", err)
 	}
@@ -158,7 +158,7 @@ func TestExecEncodedCarriesConfiguredArgvWithoutShellEvaluation(t *testing.T) {
 	result := filepath.Join(directory, "arguments.txt")
 	marker := filepath.Join(directory, "shell-evaluated")
 	script := "#!/bin/sh\n" +
-		"printf '%s\\n' \"$@\" > \"$HEIKOU_TEST_ARGUMENTS\"\n"
+		"printf '%s\\n' \"$@\" > \"$SHEPHERD_TEST_ARGUMENTS\"\n"
 	if err := os.WriteFile(target, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -170,13 +170,13 @@ func TestExecEncodedCarriesConfiguredArgvWithoutShellEvaluation(t *testing.T) {
 	prompt := "--leading prompt with `ticks` and 日本語"
 	command := exec.Command(os.Args[0], "-test.run=^TestExecEncodedHelper$")
 	command.Env = append(os.Environ(),
-		"HEIKOU_EXEC_HELPER=1",
-		"HEIKOU_TEST_ARGUMENTS="+result,
-		"HEIKOU_TEST_BACKEND=claude",
-		"HEIKOU_TEST_PROMPT="+Encode(prompt),
-		"HEIKOU_TEST_TITLE="+Encode("configured title"),
-		"HEIKOU_TEST_COMMAND="+encodedCommand,
-		"HEIKOU_SESSION_ID=018f0000-0000-4000-8000-000000000000",
+		"SHEPHERD_EXEC_HELPER=1",
+		"SHEPHERD_TEST_ARGUMENTS="+result,
+		"SHEPHERD_TEST_BACKEND=claude",
+		"SHEPHERD_TEST_PROMPT="+Encode(prompt),
+		"SHEPHERD_TEST_TITLE="+Encode("configured title"),
+		"SHEPHERD_TEST_COMMAND="+encodedCommand,
+		"SHEPHERD_SESSION_ID=018f0000-0000-4000-8000-000000000000",
 	)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("helper: %v\n%s", err, output)
@@ -208,7 +208,7 @@ func TestExecEncodedCarriesResumeTargetWithoutShellEvaluation(t *testing.T) {
 	result := filepath.Join(directory, "arguments.txt")
 	marker := filepath.Join(directory, "shell-evaluated")
 	script := "#!/bin/sh\n" +
-		"printf '%s\\n' \"$@\" > \"$HEIKOU_TEST_ARGUMENTS\"\n"
+		"printf '%s\\n' \"$@\" > \"$SHEPHERD_TEST_ARGUMENTS\"\n"
 	if err := os.WriteFile(target, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -219,14 +219,14 @@ func TestExecEncodedCarriesResumeTargetWithoutShellEvaluation(t *testing.T) {
 	resume := "$(touch " + marker + ")"
 	command := exec.Command(os.Args[0], "-test.run=^TestExecEncodedHelper$")
 	command.Env = append(os.Environ(),
-		"HEIKOU_EXEC_HELPER=1",
-		"HEIKOU_TEST_ARGUMENTS="+result,
-		"HEIKOU_TEST_BACKEND=claude",
-		"HEIKOU_TEST_PROMPT="+Encode("carry on"),
-		"HEIKOU_TEST_TITLE="+Encode("title"),
-		"HEIKOU_TEST_COMMAND="+encodedCommand,
-		"HEIKOU_TEST_RESUME="+Encode(resume),
-		"HEIKOU_SESSION_ID=018f0000-0000-4000-8000-000000000000",
+		"SHEPHERD_EXEC_HELPER=1",
+		"SHEPHERD_TEST_ARGUMENTS="+result,
+		"SHEPHERD_TEST_BACKEND=claude",
+		"SHEPHERD_TEST_PROMPT="+Encode("carry on"),
+		"SHEPHERD_TEST_TITLE="+Encode("title"),
+		"SHEPHERD_TEST_COMMAND="+encodedCommand,
+		"SHEPHERD_TEST_RESUME="+Encode(resume),
+		"SHEPHERD_SESSION_ID=018f0000-0000-4000-8000-000000000000",
 	)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("helper: %v\n%s", err, output)
@@ -246,15 +246,15 @@ func TestExecEncodedCarriesResumeTargetWithoutShellEvaluation(t *testing.T) {
 }
 
 func TestExecEncodedHelper(t *testing.T) {
-	if os.Getenv("HEIKOU_EXEC_HELPER") != "1" {
+	if os.Getenv("SHEPHERD_EXEC_HELPER") != "1" {
 		return
 	}
 	err := ExecEncoded(
-		os.Getenv("HEIKOU_TEST_BACKEND"),
-		os.Getenv("HEIKOU_TEST_PROMPT"),
-		os.Getenv("HEIKOU_TEST_TITLE"),
-		os.Getenv("HEIKOU_TEST_COMMAND"),
-		os.Getenv("HEIKOU_TEST_RESUME"),
+		os.Getenv("SHEPHERD_TEST_BACKEND"),
+		os.Getenv("SHEPHERD_TEST_PROMPT"),
+		os.Getenv("SHEPHERD_TEST_TITLE"),
+		os.Getenv("SHEPHERD_TEST_COMMAND"),
+		os.Getenv("SHEPHERD_TEST_RESUME"),
 	)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

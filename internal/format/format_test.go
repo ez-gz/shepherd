@@ -18,7 +18,7 @@ func TestDurationPicksTheUnitThatStillCarriesInformation(t *testing.T) {
 		{90 * time.Minute, "1h30m"},
 		{time.Hour, "1h00m"},
 		{23*time.Hour + 59*time.Minute, "23h59m"},
-		// The boundary that drifted: cmd/h used to stop at hours and report a
+		// The boundary that drifted: cmd/shepherd used to stop at hours and report a
 		// three-day-old session as 72h00m while the dashboard said 3d.
 		{24 * time.Hour, "1d"},
 		{72 * time.Hour, "3d"},
@@ -99,8 +99,8 @@ func TestSanitizeKeepsTheLineStructureOneLineDiscards(t *testing.T) {
 func TestCompactPathOnlyRewritesTheHomePrefix(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	if got := CompactPath(home + "/projects/heikou"); got != "~/projects/heikou" {
-		t.Errorf("CompactPath inside home = %q, want %q", got, "~/projects/heikou")
+	if got := CompactPath(home + "/projects/shepherd"); got != "~/projects/shepherd" {
+		t.Errorf("CompactPath inside home = %q, want %q", got, "~/projects/shepherd")
 	}
 	if got := CompactPath(home); got != "~" {
 		t.Errorf("CompactPath of home itself = %q, want %q", got, "~")

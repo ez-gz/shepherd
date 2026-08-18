@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zamborg/heikou/internal/config"
+	"github.com/ez-gz/shepherd/internal/config"
 )
 
 // strokeIdentifiers names the local variables a function dispatches keystrokes

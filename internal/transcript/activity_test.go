@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zamborg/heikou/internal/heikou"
+	"github.com/ez-gz/shepherd/internal/shepherd"
 )
 
 func toolUseRecord(t *testing.T, stopReason string, blocks ...map[string]any) string {
@@ -36,7 +36,7 @@ func toolResultRecord(t *testing.T, id string) string {
 func readActivity(t *testing.T, projects string) Activity {
 	t.Helper()
 	item, err := Reader{ClaudeProjects: projects}.ReadActivity(Request{
-		Runner: heikou.BackendClaude, SessionID: testSessionID, Root: "/tmp/project",
+		Runner: shepherd.BackendClaude, SessionID: testSessionID, Root: "/tmp/project",
 	})
 	if err != nil {
 		t.Fatalf("ReadActivity: %v", err)
@@ -211,7 +211,7 @@ func TestOnlyTheEndOfALongTranscriptIsRead(t *testing.T) {
 
 func TestActivityForAMissingTranscriptIsAnAnswerNotAnError(t *testing.T) {
 	item, err := Reader{ClaudeProjects: t.TempDir()}.ReadActivity(Request{
-		Runner: heikou.BackendClaude, SessionID: testSessionID, Root: "/tmp/project",
+		Runner: shepherd.BackendClaude, SessionID: testSessionID, Root: "/tmp/project",
 	})
 	if err != nil {
 		t.Fatalf("ReadActivity: %v", err)
@@ -223,7 +223,7 @@ func TestActivityForAMissingTranscriptIsAnAnswerNotAnError(t *testing.T) {
 
 func TestActivityForCodexReportsUnsupportedWithItsReason(t *testing.T) {
 	item, err := Reader{ClaudeProjects: t.TempDir()}.ReadActivity(Request{
-		Runner: heikou.BackendCodex, SessionID: testSessionID, Root: "/tmp/project",
+		Runner: shepherd.BackendCodex, SessionID: testSessionID, Root: "/tmp/project",
 	})
 	if err != nil {
 		t.Fatalf("ReadActivity: %v", err)
@@ -237,7 +237,7 @@ func TestActivityForCodexReportsUnsupportedWithItsReason(t *testing.T) {
 }
 
 func TestActivityRejectsAnEmptySessionID(t *testing.T) {
-	if _, err := (Reader{}).ReadActivity(Request{Runner: heikou.BackendClaude}); err == nil {
+	if _, err := (Reader{}).ReadActivity(Request{Runner: shepherd.BackendClaude}); err == nil {
 		t.Fatal("ReadActivity() error = nil for an empty session id")
 	}
 }

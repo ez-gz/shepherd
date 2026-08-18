@@ -6,18 +6,18 @@ import (
 	"io"
 	"strings"
 
-	"github.com/zamborg/heikou/internal/control"
-	"github.com/zamborg/heikou/internal/format"
-	"github.com/zamborg/heikou/internal/home"
-	"github.com/zamborg/heikou/internal/workstream"
+	"github.com/ez-gz/shepherd/internal/control"
+	"github.com/ez-gz/shepherd/internal/format"
+	"github.com/ez-gz/shepherd/internal/home"
+	"github.com/ez-gz/shepherd/internal/workstream"
 )
 
 const (
 	// ManagersWorkstreamName is seeded once so a new installation has somewhere
 	// to run pilots without the user having to build it by hand.
-	ManagersWorkstreamName = "heikou-managers"
+	ManagersWorkstreamName = "shepherd-managers"
 
-	managersWorkstreamDescription = "Agent sessions that maintain Heikou's own state."
+	managersWorkstreamDescription = "Agent sessions that maintain Shepherd's own state."
 )
 
 // provisionInstallation seeds the managers workstream on an installation that
@@ -36,11 +36,11 @@ func provisionInstallation(ctx context.Context, controller control.Service, stor
 		return
 	}
 	if err := seedManagersWorkstream(ctx, controller, writer); err != nil {
-		fmt.Fprintln(writer, "heikou:", format.OneLine(err.Error()))
+		fmt.Fprintln(writer, "shepherd:", format.OneLine(err.Error()))
 	}
 }
 
-// seedManagersWorkstream creates the workstream rooted only at the Heikou home
+// seedManagersWorkstream creates the workstream rooted only at the Shepherd home
 // directory, so sessions started there can see AGENTS.md and the state they are
 // meant to maintain.
 func seedManagersWorkstream(ctx context.Context, controller control.Service, writer io.Writer) error {
@@ -52,11 +52,11 @@ func seedManagersWorkstream(ctx context.Context, controller control.Service, wri
 	if err != nil {
 		return fmt.Errorf("create the %s workstream: %w", ManagersWorkstreamName, err)
 	}
-	fmt.Fprintf(writer, "heikou: created the %s workstream rooted at %s\n", item.Name, dir)
+	fmt.Fprintf(writer, "shepherd: created the %s workstream rooted at %s\n", item.Name, dir)
 	return nil
 }
 
-// reprovisionManagersWorkstream is the explicit opt-in behind h init. An
+// reprovisionManagersWorkstream is the explicit opt-in behind shepherd init. An
 // established installation is never seeded implicitly — injecting a workstream
 // into state someone already organized would be presumptuous — so this is how a
 // user asks for it, and how they get it back after deleting it.

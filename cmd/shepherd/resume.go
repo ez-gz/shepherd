@@ -6,15 +6,15 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/zamborg/heikou/internal/format"
-	"github.com/zamborg/heikou/internal/workstream"
+	"github.com/ez-gz/shepherd/internal/format"
+	"github.com/ez-gz/shepherd/internal/workstream"
 )
 
 // runResume continues a session's native conversation in a new pane.
 //
 // This is the verb the durable conversation registration exists for. A tmux
 // pane dies and the session becomes unreachable, but the runner wrote the
-// conversation to disk and Heikou knows its id — so the work can be picked up
+// conversation to disk and Shepherd knows its id — so the work can be picked up
 // where it stopped instead of restarted cold.
 //
 // It deliberately creates a new session rather than reviving the old record.
@@ -22,14 +22,14 @@ import (
 // ended; rewriting it to look alive would destroy the one durable account of
 // that. The new session records the conversation it was handed.
 func (a *app) runResume(args []string) error {
-	flags := a.newFlagSet("h resume")
+	flags := a.newFlagSet("shepherd resume")
 	socket := flags.String("socket", defaultSocket(), "private tmux socket name")
 	jsonOutput := flags.Bool("json", false, "write a machine-readable result")
 	if err := parseAnywhere(flags, args); err != nil {
 		return err
 	}
 	if flags.NArg() < 2 {
-		return errors.New("usage: h resume <session-id> <message>; put -- before a message that starts with a dash")
+		return errors.New("usage: shepherd resume <session-id> <message>; put -- before a message that starts with a dash")
 	}
 	controller, err := a.dial(*socket)
 	if err != nil {
@@ -42,7 +42,7 @@ func (a *app) runResume(args []string) error {
 		return err
 	}
 	if !session.Durable {
-		return fmt.Errorf("session %s has no durable record, so Heikou never registered its conversation",
+		return fmt.Errorf("session %s has no durable record, so Shepherd never registered its conversation",
 			format.ShortID(session.ID))
 	}
 
@@ -56,7 +56,7 @@ func (a *app) runResume(args []string) error {
 		conversation = *resumed.Record.Conversation
 	}
 
-	name := "h-" + resumed.ID
+	name := "shepherd-" + resumed.ID
 	if resumed.Runtime != nil {
 		name = resumed.Runtime.Name
 	}
@@ -73,22 +73,22 @@ func (a *app) runResume(args []string) error {
 	return nil
 }
 
-// runConversation reports the native conversation id Heikou has registered for
-// a session, registering it first when the runner minted it and Heikou has not
+// runConversation reports the native conversation id Shepherd has registered for
+// a session, registering it first when the runner minted it and Shepherd has not
 // had to ask before.
 //
 // It prints the source alongside the id, and that is the point of the verb: an
-// id Heikou assigned is a fact, and an id Heikou matched against runner-written
+// id Shepherd assigned is a fact, and an id Shepherd matched against runner-written
 // files is evidence. A reader about to act on one deserves to know which it is.
 func (a *app) runConversation(args []string) error {
-	flags := a.newFlagSet("h conversation")
+	flags := a.newFlagSet("shepherd conversation")
 	socket := flags.String("socket", defaultSocket(), "private tmux socket name")
 	jsonOutput := flags.Bool("json", false, "write a machine-readable result")
 	if err := parseAnywhere(flags, args); err != nil {
 		return err
 	}
 	if flags.NArg() != 1 {
-		return errors.New("usage: h conversation <session-id> [--json]")
+		return errors.New("usage: shepherd conversation <session-id> [--json]")
 	}
 	controller, err := a.dial(*socket)
 	if err != nil {
@@ -105,7 +105,7 @@ func (a *app) runConversation(args []string) error {
 	if registerErr != nil {
 		// An unregistered conversation is an answer, not a failure: Codex mints
 		// its own id and the record that would prove which one may be absent.
-		// The verb says why, and exits zero, for the same reason h history does.
+		// The verb says why, and exits zero, for the same reason shepherd history does.
 		if *jsonOutput {
 			return writeJSON(a.out, map[string]any{
 				"session_id": session.ID, "runner": session.Backend,

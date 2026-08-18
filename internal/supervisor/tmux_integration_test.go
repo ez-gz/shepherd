@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zamborg/heikou/internal/env"
-	"github.com/zamborg/heikou/internal/heikou"
+	"github.com/ez-gz/shepherd/internal/env"
+	"github.com/ez-gz/shepherd/internal/shepherd"
 )
 
 // requireTmux returns the tmux binary. Without tmux these tests cannot run at
@@ -24,8 +24,8 @@ func requireTmux(t *testing.T) string {
 	if err == nil {
 		return binary
 	}
-	if os.Getenv("HEIKOU_TEST_REQUIRE_TMUX") != "" {
-		t.Fatalf("HEIKOU_TEST_REQUIRE_TMUX is set but tmux was not found on PATH: %v", err)
+	if os.Getenv("SHEPHERD_TEST_REQUIRE_TMUX") != "" {
+		t.Fatalf("SHEPHERD_TEST_REQUIRE_TMUX is set but tmux was not found on PATH: %v", err)
 	}
 	t.Skip("tmux is not installed")
 	return ""
@@ -43,7 +43,7 @@ func TestTmuxLifecycleAndLiteralMessageDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	socket := fmt.Sprintf("heikou-test-%d-%s", os.Getpid(), token)
+	socket := fmt.Sprintf("shepherd-test-%d-%s", os.Getpid(), token)
 
 	fixtureDir := filepath.Join(t.TempDir(), "fixture space 日本")
 	if err := os.MkdirAll(fixtureDir, 0o755); err != nil {
@@ -70,9 +70,9 @@ func TestTmuxLifecycleAndLiteralMessageDelivery(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	callerID := "018f0000-0000-4000-8000-000000000001"
-	session, err := manager.Start(ctx, heikou.StartRequest{
+	session, err := manager.Start(ctx, shepherd.StartRequest{
 		ID:      callerID,
-		Backend: heikou.BackendCodex,
+		Backend: shepherd.BackendCodex,
 		Prompt:  prompt,
 		Root:    fixtureDir,
 	})
@@ -82,11 +82,11 @@ func TestTmuxLifecycleAndLiteralMessageDelivery(t *testing.T) {
 	if session.ID != callerID || session.PaneID == "" {
 		t.Fatalf("incomplete session identity: %#v", session)
 	}
-	storedID, err := manager.run(ctx, nil, "show-options", "-v", "-t", session.Name, "@heikou_id")
+	storedID, err := manager.run(ctx, nil, "show-options", "-v", "-t", session.Name, "@shepherd_id")
 	if err != nil || strings.TrimSpace(string(storedID)) != callerID {
 		t.Fatalf("caller identity was not installed at creation: value=%q err=%v", storedID, err)
 	}
-	canonical, err := manager.run(ctx, nil, "show-options", "-pv", "-t", session.PaneID, "@heikou_canonical")
+	canonical, err := manager.run(ctx, nil, "show-options", "-pv", "-t", session.PaneID, "@shepherd_canonical")
 	if err != nil || strings.TrimSpace(string(canonical)) != "1" {
 		t.Fatalf("canonical marker was not installed at creation: value=%q err=%v", canonical, err)
 	}
@@ -104,7 +104,7 @@ func TestTmuxLifecycleAndLiteralMessageDelivery(t *testing.T) {
 	if err := manager.Send(ctx, session, message); err != nil {
 		t.Fatal(err)
 	}
-	var observed []heikou.Session
+	var observed []shepherd.Session
 	var observedErr error
 	var deadObservedAt time.Time
 	deadline := time.Now().Add(5 * time.Second)
@@ -112,7 +112,7 @@ pollExit:
 	for time.Now().Before(deadline) {
 		observed, observedErr = manager.Sessions(context.Background())
 		if observedErr == nil && len(observed) == 1 {
-			if observed[0].Status == heikou.StatusFailed && !observed[0].EndedAt.IsZero() {
+			if observed[0].Status == shepherd.StatusFailed && !observed[0].EndedAt.IsZero() {
 				break pollExit
 			}
 			if !observed[0].Alive() && legacyDeadMetadata {
@@ -149,13 +149,13 @@ pollExit:
 	fields := strings.Split(metadata, "|")
 	switch {
 	case len(fields) == 3 && fields[0] == "7":
-		if finished.Status != heikou.StatusFailed || finished.ExitCode == nil || *finished.ExitCode != 7 || finished.EndedAt.IsZero() {
+		if finished.Status != shepherd.StatusFailed || finished.ExitCode == nil || *finished.ExitCode != 7 || finished.EndedAt.IsZero() {
 			t.Fatalf("exit metadata = %#v", finished)
 		}
 	case metadata == "||" && legacyDeadMetadata:
 		// tmux before 3.5 intermittently retains a dead pane without exit fields.
 		// The pane is known dead, but its exit code and end time are not known.
-		if finished.Status != heikou.StatusExited || finished.ExitCode != nil || !finished.EndedAt.IsZero() {
+		if finished.Status != shepherd.StatusExited || finished.ExitCode != nil || !finished.EndedAt.IsZero() {
 			t.Fatalf("omitted exit metadata was projected as known: %#v", finished)
 		}
 		t.Logf("%s omitted retained-pane exit metadata", tmuxVersion)
@@ -214,22 +214,22 @@ func TestRuntimeExistsFindsPaneWithMalformedProjectionMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	manager := &Tmux{
-		binary: tmuxBinary, socket: fmt.Sprintf("heikou-test-%d-%s", os.Getpid(), token), executable: "/bin/true",
+		binary: tmuxBinary, socket: fmt.Sprintf("shepherd-test-%d-%s", os.Getpid(), token), executable: "/bin/true",
 	}
 	t.Cleanup(func() { cleanupTestTmux(manager) })
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	id := "018f0000-0000-4000-8000-000000000002"
-	session, err := manager.Start(ctx, heikou.StartRequest{
-		ID: id, Backend: heikou.BackendNoAgent, Prompt: "partial metadata", Root: t.TempDir(),
+	session, err := manager.Start(ctx, shepherd.StartRequest{
+		ID: id, Backend: shepherd.BackendNoAgent, Prompt: "partial metadata", Root: t.TempDir(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := manager.run(ctx, nil, "set-option", "-t", session.Name, "@heikou_prompt", "%%%not-base64%%%"); err != nil {
+	if _, err := manager.run(ctx, nil, "set-option", "-t", session.Name, "@shepherd_prompt", "%%%not-base64%%%"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := manager.run(ctx, nil, "set-option", "-u", "-t", session.Name, "@heikou_id"); err != nil {
+	if _, err := manager.run(ctx, nil, "set-option", "-u", "-t", session.Name, "@shepherd_id"); err != nil {
 		t.Fatal(err)
 	}
 	sessions, err := manager.Sessions(ctx)
@@ -254,11 +254,11 @@ func TestBootstrapRemovesCredentialUnsetAfterServerStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	socket := fmt.Sprintf("heikou-env-test-%d-%s", os.Getpid(), token)
+	socket := fmt.Sprintf("shepherd-env-test-%d-%s", os.Getpid(), token)
 	fixtureDir := t.TempDir()
 	wrapper := filepath.Join(fixtureDir, "environment agent")
 	script := "#!/bin/sh\n" +
-		"printf 'credential=<%s>\\n' \"${HEIKOU_STALE_CREDENTIAL-unset}\"\n" +
+		"printf 'credential=<%s>\\n' \"${SHEPHERD_STALE_CREDENTIAL-unset}\"\n" +
 		"exit 0\n"
 	if err := os.WriteFile(wrapper, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
@@ -267,19 +267,19 @@ func TestBootstrapRemovesCredentialUnsetAfterServerStart(t *testing.T) {
 	manager := &Tmux{binary: tmuxBinary, socket: socket, executable: wrapper}
 	t.Cleanup(func() { cleanupTestTmux(manager) })
 	t.Setenv(env.CodexBinary, "/bin/sh")
-	t.Setenv("HEIKOU_STALE_CREDENTIAL", "old-secret")
+	t.Setenv("SHEPHERD_STALE_CREDENTIAL", "old-secret")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := manager.Bootstrap(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Unsetenv("HEIKOU_STALE_CREDENTIAL"); err != nil {
+	if err := os.Unsetenv("SHEPHERD_STALE_CREDENTIAL"); err != nil {
 		t.Fatal(err)
 	}
 
-	session, err := manager.Start(ctx, heikou.StartRequest{
+	session, err := manager.Start(ctx, shepherd.StartRequest{
 		ID:      "018f0000-0000-4000-8000-000000000002",
-		Backend: heikou.BackendCodex,
+		Backend: shepherd.BackendCodex,
 		Prompt:  "inspect environment",
 		Root:    fixtureDir,
 	})
@@ -305,7 +305,7 @@ func TestNoAgentStartsDefaultShellWithoutInjectingLabel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	socket := fmt.Sprintf("heikou-shell-test-%d-%s", os.Getpid(), token)
+	socket := fmt.Sprintf("shepherd-shell-test-%d-%s", os.Getpid(), token)
 	root := filepath.Join(t.TempDir(), "shell root 日本")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
@@ -318,9 +318,9 @@ func TestNoAgentStartsDefaultShellWithoutInjectingLabel(t *testing.T) {
 	label := "scratch shell $(touch " + marker + ")"
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	session, err := manager.Start(ctx, heikou.StartRequest{
+	session, err := manager.Start(ctx, shepherd.StartRequest{
 		ID:      "018f0000-0000-4000-8000-000000000003",
-		Backend: heikou.BackendNoAgent,
+		Backend: shepherd.BackendNoAgent,
 		Prompt:  label,
 		Root:    root,
 		Command: []string{"/path/that/must/also/not/run", "--flag"},
@@ -335,12 +335,12 @@ func TestNoAgentStartsDefaultShellWithoutInjectingLabel(t *testing.T) {
 		t.Fatalf("no-agent label was injected into the shell: %v", err)
 	}
 
-	if err := manager.Send(ctx, session, `printf 'HEIKOU_ROOT=<%s>\n' "$PWD"`); err != nil {
+	if err := manager.Send(ctx, session, `printf 'SHEPHERD_ROOT=<%s>\n' "$PWD"`); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, 5*time.Second, func() bool {
 		preview, captureErr := manager.Capture(context.Background(), session, 30)
-		return captureErr == nil && strings.Contains(preview, "HEIKOU_ROOT=<"+root+">")
+		return captureErr == nil && strings.Contains(preview, "SHEPHERD_ROOT=<"+root+">")
 	})
 	preview, err := manager.Capture(ctx, session, 30)
 	if err != nil {
@@ -370,7 +370,7 @@ func TestShiftEnterReachesAPaneThatNeverNegotiatedForIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	socket := fmt.Sprintf("heikou-keys-test-%d-%s", os.Getpid(), token)
+	socket := fmt.Sprintf("shepherd-keys-test-%d-%s", os.Getpid(), token)
 	root := t.TempDir()
 	keystrokes := filepath.Join(root, "keystrokes")
 
@@ -380,9 +380,9 @@ func TestShiftEnterReachesAPaneThatNeverNegotiatedForIt(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	session, err := manager.Start(ctx, heikou.StartRequest{
+	session, err := manager.Start(ctx, shepherd.StartRequest{
 		ID:      "018f0000-0000-4000-8000-000000000004",
-		Backend: heikou.BackendNoAgent,
+		Backend: shepherd.BackendNoAgent,
 		Prompt:  "read raw keys",
 		Root:    root,
 	})

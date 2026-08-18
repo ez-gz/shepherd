@@ -12,8 +12,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/zamborg/heikou/internal/format"
-	"github.com/zamborg/heikou/internal/heikou"
+	"github.com/ez-gz/shepherd/internal/format"
+	"github.com/ez-gz/shepherd/internal/shepherd"
 )
 
 const (
@@ -68,9 +68,9 @@ const (
 // phrase belongs to whoever is drawing, because the words differ between a row
 // with twenty columns and a pane with a whole line.
 type Activity struct {
-	SessionID    string         `json:"session_id"`
-	Runner       heikou.Backend `json:"runner"`
-	Availability Availability   `json:"availability"`
+	SessionID    string           `json:"session_id"`
+	Runner       shepherd.Backend `json:"runner"`
+	Availability Availability     `json:"availability"`
 	// Reason explains anything other than Available, in one line.
 	Reason string `json:"reason,omitempty"`
 	// Path is where the records were read from, and is empty unless Available.
@@ -118,7 +118,7 @@ func (r Reader) ReadActivity(request Request) (Activity, error) {
 	if strings.TrimSpace(request.SessionID) == "" {
 		return result, errors.New("read activity: session id is empty")
 	}
-	if request.Runner != heikou.BackendClaude {
+	if request.Runner != shepherd.BackendClaude {
 		result.Availability = Unsupported
 		result.Reason = unsupportedReason(request.Runner)
 		return result, nil

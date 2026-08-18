@@ -9,12 +9,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
-	"github.com/zamborg/heikou/internal/env"
-	"github.com/zamborg/heikou/internal/heikou"
-	"github.com/zamborg/heikou/internal/home"
+	"github.com/ez-gz/shepherd/internal/env"
+	"github.com/ez-gz/shepherd/internal/home"
+	"github.com/ez-gz/shepherd/internal/shepherd"
 	"golang.org/x/sys/unix"
 )
 
@@ -133,42 +132,6 @@ func (s FileStore) Mutate(ctx context.Context, mutate func(*State) (bool, error)
 	return state, nil
 }
 
-// RebaseArtifacts repoints workstream artifact directories that still live
-// inside a previous artifact base. Artifact directories are persisted absolute,
-// so relocating them on disk would otherwise strand every notes.md and artifact
-// tree behind a path no longer present.
-//
-// It deliberately leaves Revision and UpdatedAt alone. Nothing about the
-// workstream changed; only where Heikou keeps its files did, and claiming a
-// domain edit for a relocation would be dishonest to anything reading revisions.
-func (s FileStore) RebaseArtifacts(ctx context.Context, previousBase string) (int, error) {
-	previousBase = strings.TrimSpace(previousBase)
-	if previousBase == "" {
-		return 0, nil
-	}
-	previousBase = filepath.Clean(previousBase)
-	rebased := 0
-	_, err := s.Mutate(ctx, func(state *State) (bool, error) {
-		rebased = 0
-		for index := range state.Workstreams {
-			item := &state.Workstreams[index]
-			relative, err := filepath.Rel(previousBase, filepath.Clean(item.ArtifactDir))
-			if err != nil || relative == ".." ||
-				strings.HasPrefix(relative, ".."+string(filepath.Separator)) ||
-				filepath.IsAbs(relative) {
-				continue
-			}
-			item.ArtifactDir = filepath.Join(s.Artifacts, relative)
-			rebased++
-		}
-		return rebased > 0, nil
-	})
-	if err != nil {
-		return 0, err
-	}
-	return rebased, nil
-}
-
 // WithLifecycleLock serializes operations that cross the durable store and
 // tmux, such as launching or deleting a session. It uses a separate lock from
 // state reads/writes so those operations may still call Load and Mutate.
@@ -218,18 +181,18 @@ type stateV1 struct {
 }
 
 type sessionRecordV1 struct {
-	ID            string         `json:"id"`
-	Backend       heikou.Backend `json:"backend"`
-	InitialPrompt string         `json:"initial_prompt"`
-	InitialRoot   string         `json:"initial_root"`
-	CreatedAt     time.Time      `json:"created_at"`
-	Launch        LaunchIntent   `json:"launch"`
-	Outcome       *Outcome       `json:"outcome,omitempty"`
+	ID            string           `json:"id"`
+	Backend       shepherd.Backend `json:"backend"`
+	InitialPrompt string           `json:"initial_prompt"`
+	InitialRoot   string           `json:"initial_root"`
+	CreatedAt     time.Time        `json:"created_at"`
+	Launch        LaunchIntent     `json:"launch"`
+	Outcome       *Outcome         `json:"outcome,omitempty"`
 }
 
 // stateV2 is the exact persisted v2 shape, kept for the same reason stateV1 is:
 // a file claiming v2 must reject the v3 conversation field rather than absorb
-// it, so that a state written by a newer Heikou cannot be silently downgraded
+// it, so that a state written by a newer Shepherd cannot be silently downgraded
 // and rewritten with the registration dropped.
 type stateV2 struct {
 	Version     int               `json:"version"`
@@ -240,14 +203,14 @@ type stateV2 struct {
 }
 
 type sessionRecordV2 struct {
-	ID            string         `json:"id"`
-	Backend       heikou.Backend `json:"backend"`
-	Title         string         `json:"title,omitempty"`
-	InitialPrompt string         `json:"initial_prompt"`
-	InitialRoot   string         `json:"initial_root"`
-	CreatedAt     time.Time      `json:"created_at"`
-	Launch        LaunchIntent   `json:"launch"`
-	Outcome       *Outcome       `json:"outcome,omitempty"`
+	ID            string           `json:"id"`
+	Backend       shepherd.Backend `json:"backend"`
+	Title         string           `json:"title,omitempty"`
+	InitialPrompt string           `json:"initial_prompt"`
+	InitialRoot   string           `json:"initial_root"`
+	CreatedAt     time.Time        `json:"created_at"`
+	Launch        LaunchIntent     `json:"launch"`
+	Outcome       *Outcome         `json:"outcome,omitempty"`
 }
 
 func (legacy stateV2) state() State {
@@ -396,7 +359,7 @@ func migrateStateV1ToV2(state State) (State, error) {
 // schema-only transition: every existing session keeps a nil conversation
 // rather than being back-filled.
 //
-// Back-filling would be possible for Claude — Heikou passed --session-id, so
+// Back-filling would be possible for Claude — Shepherd passed --session-id, so
 // the durable id is the conversation id — and it is deliberately not done. A
 // v2 record cannot distinguish a session that ran from one whose launch failed
 // before Claude ever wrote a transcript, so back-filling would register

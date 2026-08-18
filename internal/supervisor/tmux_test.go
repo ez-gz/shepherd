@@ -5,13 +5,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zamborg/heikou/internal/heikou"
-	"github.com/zamborg/heikou/internal/runner"
+	"github.com/ez-gz/shepherd/internal/runner"
+	"github.com/ez-gz/shepherd/internal/shepherd"
 )
 
 func TestParseSessionTreatsPaneModeAsCount(t *testing.T) {
 	fields := []string{
-		"h-test", "%1", "018f0000-0000-4000-8000-000000000000", "%1",
+		"shepherd-test", "%1", "018f0000-0000-4000-8000-000000000000", "%1",
 		"", "codex", "1000", runner.Encode("task"), runner.Encode("/tmp/root"),
 		"0", "", "", "1001", "/tmp/root", "codex", "0", "2", "1", runner.Encode("follow up"),
 	}
@@ -49,7 +49,7 @@ func TestTitleForStripsTerminalControlSequences(t *testing.T) {
 
 func TestRuntimeMetadataParsesExitTime(t *testing.T) {
 	fields := []string{
-		"h-test", "%1", "018f0000-0000-4000-8000-000000000000", "%1",
+		"shepherd-test", "%1", "018f0000-0000-4000-8000-000000000000", "%1",
 		"", "claude", "1000", runner.Encode("task"), runner.Encode("/tmp/root"),
 		"1", "7", "1042", "1042", "/tmp/root", "claude", "0", "0", "0", "",
 	}
@@ -70,19 +70,19 @@ func TestParseSessionDistinguishesUnknownAndKnownExitCodes(t *testing.T) {
 		name       string
 		dead       string
 		rawCode    string
-		wantStatus heikou.Status
+		wantStatus shepherd.Status
 		wantCode   *int
 	}{
-		{name: "live", dead: "0", rawCode: "", wantStatus: heikou.StatusLive},
-		{name: "live ignores stale code", dead: "0", rawCode: "7", wantStatus: heikou.StatusLive},
-		{name: "dead unknown", dead: "1", rawCode: "", wantStatus: heikou.StatusExited},
-		{name: "dead success", dead: "1", rawCode: "0", wantStatus: heikou.StatusExited, wantCode: exitCodePointer(0)},
-		{name: "dead failure", dead: "1", rawCode: "7", wantStatus: heikou.StatusFailed, wantCode: exitCodePointer(7)},
+		{name: "live", dead: "0", rawCode: "", wantStatus: shepherd.StatusLive},
+		{name: "live ignores stale code", dead: "0", rawCode: "7", wantStatus: shepherd.StatusLive},
+		{name: "dead unknown", dead: "1", rawCode: "", wantStatus: shepherd.StatusExited},
+		{name: "dead success", dead: "1", rawCode: "0", wantStatus: shepherd.StatusExited, wantCode: exitCodePointer(0)},
+		{name: "dead failure", dead: "1", rawCode: "7", wantStatus: shepherd.StatusFailed, wantCode: exitCodePointer(7)},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			fields := []string{
-				"h-test", "%1", "018f0000-0000-4000-8000-000000000000", "%1",
+				"shepherd-test", "%1", "018f0000-0000-4000-8000-000000000000", "%1",
 				"", "codex", "1000", runner.Encode("task"), runner.Encode("/tmp/root"),
 				test.dead, test.rawCode, "1042", "1042", "/tmp/root", "codex", "0", "0", "0", "",
 			}
@@ -107,7 +107,7 @@ func TestParseSessionDistinguishesUnknownAndKnownExitCodes(t *testing.T) {
 
 func TestParseSessionRejectsMalformedNonemptyExitCode(t *testing.T) {
 	fields := []string{
-		"h-test", "%1", "018f0000-0000-4000-8000-000000000000", "%1",
+		"shepherd-test", "%1", "018f0000-0000-4000-8000-000000000000", "%1",
 		"", "codex", "1000", runner.Encode("task"), runner.Encode("/tmp/root"),
 		"1", "not-a-number", "1042", "1042", "/tmp/root", "codex", "0", "0", "0", "",
 	}
@@ -120,7 +120,7 @@ func exitCodePointer(code int) *int { return &code }
 
 func TestParseSessionIgnoresMalformedOptionalUserMessage(t *testing.T) {
 	fields := []string{
-		"h-test", "%1", "018f0000-0000-4000-8000-000000000000", "%1",
+		"shepherd-test", "%1", "018f0000-0000-4000-8000-000000000000", "%1",
 		"", "codex", "1000", runner.Encode("task"), runner.Encode("/tmp/root"),
 		"0", "", "", "1001", "/tmp/root", "codex", "0", "0", "0", "%%%",
 	}
@@ -157,12 +157,12 @@ func TestValidSessionIDIsStrict(t *testing.T) {
 
 func TestParsePaneFieldsPreservesControlCharactersAndNewlines(t *testing.T) {
 	const (
-		fieldMarker  = "__heikou_field_testnonce__"
-		recordMarker = "__heikou_record_testnonce__"
+		fieldMarker  = "__shepherd_field_testnonce__"
+		recordMarker = "__shepherd_record_testnonce__"
 	)
 	want := [][]string{
-		{"h-one", "%1", "/tmp/control\x1fchar\nand newline"},
-		{"h-two", "%2", "plain"},
+		{"shepherd-one", "%1", "/tmp/control\x1fchar\nand newline"},
+		{"shepherd-two", "%2", "plain"},
 	}
 	output := strings.Join(want[0], fieldMarker) + recordMarker + "\n" +
 		strings.Join(want[1], fieldMarker) + recordMarker + "\n"
@@ -184,10 +184,10 @@ func TestParsePaneFieldsPreservesControlCharactersAndNewlines(t *testing.T) {
 
 func TestParsePaneFieldsRejectsSentinelCollision(t *testing.T) {
 	const (
-		fieldMarker  = "__heikou_field_testnonce__"
-		recordMarker = "__heikou_record_testnonce__"
+		fieldMarker  = "__shepherd_field_testnonce__"
+		recordMarker = "__shepherd_record_testnonce__"
 	)
-	output := "h-one" + fieldMarker + "value " + recordMarker + " collision" + recordMarker + "\n"
+	output := "shepherd-one" + fieldMarker + "value " + recordMarker + " collision" + recordMarker + "\n"
 	if _, err := parsePaneFields([]byte(output), fieldMarker, recordMarker, 2); err == nil {
 		t.Fatal("parsePaneFields() accepted a record sentinel collision")
 	}
@@ -195,13 +195,13 @@ func TestParsePaneFieldsRejectsSentinelCollision(t *testing.T) {
 
 func TestEnvironmentNamesExcludeNestedTmux(t *testing.T) {
 	t.Setenv("TMUX", "/tmp/socket")
-	t.Setenv("HEIKOU_TEST_TOKEN", "secret")
+	t.Setenv("SHEPHERD_TEST_TOKEN", "secret")
 	names := currentEnvironmentNames("STALE_TOKEN=old\n-REMOVED_TOKEN\nTERM=screen\n")
 	joined := " " + strings.Join(names, " ") + " "
 	if strings.Contains(joined, " TMUX ") {
 		t.Fatal("update-environment includes TMUX")
 	}
-	if !strings.Contains(joined, " HEIKOU_TEST_TOKEN ") {
+	if !strings.Contains(joined, " SHEPHERD_TEST_TOKEN ") {
 		t.Fatal("update-environment omitted a current safe variable name")
 	}
 	if !strings.Contains(joined, " STALE_TOKEN ") || !strings.Contains(joined, " REMOVED_TOKEN ") {

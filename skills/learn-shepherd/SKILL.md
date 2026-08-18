@@ -1,9 +1,9 @@
 ---
-name: learn-heikou
-description: Guide a new Heikou user through h quickstart, installation checks, the dashboard, workstreams, persistent notes, native agent sessions, attach and detach, follow-ups, and safe shutdown. Use when someone is setting up Heikou, asks how Heikou works, wants a first-session walkthrough, or is unfamiliar with the dashboard's organize chords or tmux controls.
+name: learn-shepherd
+description: Guide a new Shepherd user through shepherd quickstart, installation checks, the dashboard, workstreams, persistent notes, native agent sessions, attach and detach, follow-ups, and safe shutdown. Use when someone is setting up Shepherd, asks how Shepherd works, wants a first-session walkthrough, or is unfamiliar with the dashboard's organize chords or tmux controls.
 ---
 
-# Learn Heikou
+# Learn Shepherd
 
 Act as a concise, interactive guide. Teach one action at a time, wait for the
 user to try it, then explain what changed. Do not dump the entire manual at
@@ -20,13 +20,13 @@ Explain this loop in plain language:
 - A **session** is the durable record of one Codex, Claude, or shell launch.
 - A **runtime** is the tmux pane currently backing a session.
 - The **composer** is the input at the bottom of the dashboard.
-- Leaving Heikou or detaching from a session does not stop its process.
+- Leaving Shepherd or detaching from a session does not stop its process.
 
 ## Guide the first run
 
-1. Run or ask the user to run `h doctor`. Resolve missing required tools before
+1. Run or ask the user to run `shepherd doctor`. Resolve missing required tools before
    opening the dashboard.
-2. Have the user change to the project they want agents to edit and run `h`.
+2. Have the user change to the project they want agents to edit and run `shepherd`.
    The launch root shown in the composer is the directory a new session uses.
 3. Explain that workstreams persist across dashboard restarts and collect
    related sessions and context, and that everything is organized on the
@@ -59,7 +59,7 @@ Explain this loop in plain language:
     Explain that saving an empty title clears it, and that titles never rename
     the native provider conversation or tmux runtime.
 
-If this guide itself is running inside a Heikou session, start at step 7. Ask
+If this guide itself is running inside a Shepherd session, start at step 7. Ask
 the user to detach, send `I made it back` with `Space` then `Enter`, and
 reattach with `Esc` followed by `Enter`.
 Then help them organize the guided session: detach again, select it under
@@ -112,16 +112,16 @@ text, and move mark, then parks on Ungrouped. Quitting is `Ctrl-C`.
 | Send to the selected live session | `Space` on an empty composer, type a message, then `Enter` |
 | Leave a reply and compose a new session | `Esc`; the draft goes with it |
 | Attach to a selected session | `Enter` with an empty composer, when not replying |
-| Detach back to Heikou | `Ctrl-b`, release, then `d`; or `Ctrl-\` |
+| Detach back to Shepherd | `Ctrl-b`, release, then `d`; or `Ctrl-\` |
 | Copy text out of an attached session | Drag to use tmux's selection, which reaches the system clipboard but stops at the pane; hold `Shift` (`Option` in iTerm2) for the terminal's own selection |
 | Leave the dashboard without stopping agents | `Ctrl-C`, or `Esc` with an empty composer |
 | Stop a runtime but keep its record | Select it and press `Ctrl-X` twice |
 
-Mention the CLI equivalents when useful: `h quickstart`, `h list`,
-`h spawn -r RUNNER -C DIR -w WORKSTREAM LABEL`, `h send ID MESSAGE`,
-`h attach ID`, `h stop ID`, and `h help`. Add `--json` to `h list`, `h spawn`,
-or `h send` when a machine-readable result is useful.
+Mention the CLI equivalents when useful: `shepherd quickstart`, `shepherd list`,
+`shepherd spawn -r RUNNER -C DIR -w WORKSTREAM LABEL`, `shepherd send ID MESSAGE`,
+`shepherd attach ID`, `shepherd stop ID`, and `shepherd help`. Add `--json` to `shepherd list`, `shepherd spawn`,
+or `shepherd send` when a machine-readable result is useful.
 
 Do not stop, delete, archive, or move the user's sessions without explicit
-confirmation. Point to `h help` for the complete current key map if behavior
+confirmation. Point to `shepherd help` for the complete current key map if behavior
 differs from this guide because composer bindings can be configured.

@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zamborg/heikou/internal/config"
-	"github.com/zamborg/heikou/internal/control"
-	"github.com/zamborg/heikou/internal/heikou"
-	"github.com/zamborg/heikou/internal/transcript"
-	"github.com/zamborg/heikou/internal/workstream"
+	"github.com/ez-gz/shepherd/internal/config"
+	"github.com/ez-gz/shepherd/internal/control"
+	"github.com/ez-gz/shepherd/internal/shepherd"
+	"github.com/ez-gz/shepherd/internal/transcript"
+	"github.com/ez-gz/shepherd/internal/workstream"
 )
 
 const (
@@ -70,26 +70,26 @@ func runningRecord(tool string, input map[string]any) map[string]any {
 	}
 }
 
-func activitySession(alive bool, backend heikou.Backend, activity time.Time) control.Session {
-	status, runtimeStatus := control.StatusLive, heikou.StatusLive
+func activitySession(alive bool, backend shepherd.Backend, activity time.Time) control.Session {
+	status, runtimeStatus := control.StatusLive, shepherd.StatusLive
 	if !alive {
-		status, runtimeStatus = control.StatusExited, heikou.StatusExited
+		status, runtimeStatus = control.StatusExited, shepherd.StatusExited
 	}
-	runtime := heikou.Session{ID: activitySessionID, Status: runtimeStatus, LastActivityAt: activity}
+	runtime := shepherd.Session{ID: activitySessionID, Status: runtimeStatus, LastActivityAt: activity}
 	return control.Session{
 		ID: activitySessionID, Backend: backend, Prompt: "task", Root: "/tmp/project",
 		Status: status, Durable: true, Runtime: &runtime,
 	}
 }
 
-// resumedActivitySession is a session Heikou started with `--resume`: a durable
+// resumedActivitySession is a session Shepherd started with `--resume`: a durable
 // id of its own, and a registered conversation naming the one it continued.
 func resumedActivitySession(activity time.Time) control.Session {
-	session := activitySession(true, heikou.BackendClaude, activity)
+	session := activitySession(true, shepherd.BackendClaude, activity)
 	session.ID = resumedSessionID
 	session.Runtime.ID = resumedSessionID
 	session.Record = workstream.SessionRecord{
-		ID: resumedSessionID, Backend: heikou.BackendClaude, InitialPrompt: "carry on",
+		ID: resumedSessionID, Backend: shepherd.BackendClaude, InitialPrompt: "carry on",
 		InitialRoot: session.Root, CreatedAt: activity,
 		Conversation: &workstream.Conversation{
 			ID: activitySessionID, Source: workstream.ConversationAssigned, RecordedAt: activity,
@@ -153,7 +153,7 @@ func TestActivityIsPhrasedAsSomethingASessionIsDoing(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			projects := writeActivityTranscript(t, test.record)
 			observer := activityObserver(t, projects, now)
-			session := activitySession(true, heikou.BackendClaude, now)
+			session := activitySession(true, shepherd.BackendClaude, now)
 			observations, report := observer.Observe(t.Context(), []control.Session{session}, nil)
 			if len(report.Failures) != 0 {
 				t.Fatalf("failures: %v", report.Failures)
@@ -181,14 +181,14 @@ func TestActivityFragmentReadsOnlyTheCacheAndFallsThroughWhenEmpty(t *testing.T)
 	writeTranscriptUnder(t, filepath.Join(home, ".claude", "projects"),
 		runningRecord("Bash", map[string]any{"command": "make check"}))
 	reachable, err := (transcript.Reader{}).ReadActivity(transcript.Request{
-		Runner: heikou.BackendClaude, SessionID: activitySessionID, Root: "/tmp/project",
+		Runner: shepherd.BackendClaude, SessionID: activitySessionID, Root: "/tmp/project",
 	})
 	if err != nil || !reachable.Known() {
 		t.Fatalf("fixture is not where an unconfigured reader looks (%+v, %v); this test would pass for the wrong reason", reachable, err)
 	}
 
 	settings := config.Default().Brief
-	session := activitySession(true, heikou.BackendClaude, time.Now())
+	session := activitySession(true, shepherd.BackendClaude, time.Now())
 	session.LastUserMessage = "also update the release notes"
 
 	registry := NewRegistry(settings, nil)
@@ -202,11 +202,11 @@ func TestActivityFragmentReadsOnlyTheCacheAndFallsThroughWhenEmpty(t *testing.T)
 }
 
 // Derived text is the reason the approximate mark exists. A phrase assembled
-// from another program's records is not something Heikou can defend as written,
+// from another program's records is not something Shepherd can defend as written,
 // and it lands in the same columns as a title the user typed.
 func TestObservedActivityIsNeverProven(t *testing.T) {
 	settings := config.Default().Brief
-	session := activitySession(true, heikou.BackendClaude, time.Now())
+	session := activitySession(true, shepherd.BackendClaude, time.Now())
 	observations := Observations{
 		{Session: session.ID, Source: SourceActivity}: {Text: "running make check"},
 	}
@@ -231,7 +231,7 @@ func TestResolvingManyRowsDoesNoWork(t *testing.T) {
 		{Session: activitySessionID, Source: SourceActivity}: {Text: "running make check"},
 	}
 	layout, registry := LayoutFrom(settings), NewRegistry(settings, observations)
-	session := activitySession(true, heikou.BackendClaude, time.Now())
+	session := activitySession(true, shepherd.BackendClaude, time.Now())
 
 	start := time.Now()
 	for range 10_000 {
@@ -251,13 +251,13 @@ func TestActivityIsDroppedWhenASessionIsNoLongerAlive(t *testing.T) {
 	observer := activityObserver(t, projects, now)
 
 	key := Key{Session: activitySessionID, Source: SourceActivity}
-	observations, _ := observer.Observe(t.Context(), []control.Session{activitySession(true, heikou.BackendClaude, now)}, nil)
+	observations, _ := observer.Observe(t.Context(), []control.Session{activitySession(true, shepherd.BackendClaude, now)}, nil)
 	if observations[key].Text == "" {
 		t.Fatalf("a live session was not observed: %+v", observations)
 	}
 
 	observations, report := observer.Observe(t.Context(),
-		[]control.Session{activitySession(false, heikou.BackendClaude, now)}, observations)
+		[]control.Session{activitySession(false, shepherd.BackendClaude, now)}, observations)
 	if _, present := observations[key]; present {
 		t.Fatal("an exited session kept a line saying what it was doing")
 	}
@@ -266,13 +266,13 @@ func TestActivityIsDroppedWhenASessionIsNoLongerAlive(t *testing.T) {
 	}
 }
 
-// Codex records a rollout Heikou cannot identify, which is a normal state of the
+// Codex records a rollout Shepherd cannot identify, which is a normal state of the
 // world rather than a failure. It must not be reported as a broken source, and
 // it must not be retried every pass.
 func TestAnUnreadableRunnerIsQuietRatherThanAFailure(t *testing.T) {
 	now := mustTime(t, "2026-08-12T10:00:00Z")
 	observer := activityObserver(t, t.TempDir(), now)
-	session := activitySession(true, heikou.BackendCodex, now)
+	session := activitySession(true, shepherd.BackendCodex, now)
 
 	observations, report := observer.Observe(t.Context(), []control.Session{session}, nil)
 	if len(report.Failures) != 0 {
@@ -301,24 +301,24 @@ func TestActivityRereadsOnlyAfterTheIntervalAndSomeMovement(t *testing.T) {
 	projects := writeActivityTranscript(t, runningRecord("Bash", map[string]any{"command": "make check"}))
 	observer := activityObserver(t, projects, start)
 
-	observations, report := observer.Observe(t.Context(), []control.Session{activitySession(true, heikou.BackendClaude, start)}, nil)
+	observations, report := observer.Observe(t.Context(), []control.Session{activitySession(true, shepherd.BackendClaude, start)}, nil)
 	if report.Ran != 1 {
 		t.Fatalf("first look = %+v", report)
 	}
 
 	observer.now = func() time.Time { return start.Add(activityInterval / 2) }
-	moved := activitySession(true, heikou.BackendClaude, start.Add(activityInterval/2))
+	moved := activitySession(true, shepherd.BackendClaude, start.Add(activityInterval/2))
 	if _, report = observer.Observe(t.Context(), []control.Session{moved}, observations); report.Ran != 0 {
 		t.Fatalf("read again inside the interval: %+v", report)
 	}
 
 	observer.now = func() time.Time { return start.Add(2 * activityInterval) }
 	if _, report = observer.Observe(t.Context(),
-		[]control.Session{activitySession(true, heikou.BackendClaude, start)}, observations); report.Ran != 0 {
+		[]control.Session{activitySession(true, shepherd.BackendClaude, start)}, observations); report.Ran != 0 {
 		t.Fatalf("read a session that had not moved: %+v", report)
 	}
 	if _, report = observer.Observe(t.Context(),
-		[]control.Session{activitySession(true, heikou.BackendClaude, start.Add(time.Minute))}, observations); report.Ran != 1 {
+		[]control.Session{activitySession(true, shepherd.BackendClaude, start.Add(time.Minute))}, observations); report.Ran != 1 {
 		t.Fatalf("did not read a session that had waited and moved: %+v", report)
 	}
 }
@@ -352,7 +352,7 @@ func TestAResumedSessionIsReadFromTheConversationItContinued(t *testing.T) {
 	}
 }
 
-// The fallback is not a special case, it is the ordinary one: a session Heikou
+// The fallback is not a special case, it is the ordinary one: a session Shepherd
 // launched fresh is `claude --session-id <durable id>`, so the durable id is
 // the conversation id and the registration says exactly that.
 func TestAFreshSessionStillReadsTheTranscriptNamedForItsDurableID(t *testing.T) {
@@ -360,9 +360,9 @@ func TestAFreshSessionStillReadsTheTranscriptNamedForItsDurableID(t *testing.T) 
 	projects := writeActivityTranscript(t, runningRecord("Bash", map[string]any{"command": "make check"}))
 	observer := activityObserver(t, projects, now)
 
-	session := activitySession(true, heikou.BackendClaude, now)
+	session := activitySession(true, shepherd.BackendClaude, now)
 	session.Record = workstream.SessionRecord{
-		ID: activitySessionID, Backend: heikou.BackendClaude,
+		ID: activitySessionID, Backend: shepherd.BackendClaude,
 		Conversation: &workstream.Conversation{
 			ID: activitySessionID, Source: workstream.ConversationAssigned, RecordedAt: now,
 		},
@@ -374,7 +374,7 @@ func TestAFreshSessionStillReadsTheTranscriptNamedForItsDurableID(t *testing.T) 
 
 	// And a session with no registration at all — a record written before
 	// conversations were stored — still reads by its durable id.
-	unregistered := activitySession(true, heikou.BackendClaude, now)
+	unregistered := activitySession(true, shepherd.BackendClaude, now)
 	observations, _ = observer.Observe(t.Context(), []control.Session{unregistered}, nil)
 	if got := observations[Key{Session: activitySessionID, Source: SourceActivity}].Text; got != "running make check" {
 		t.Fatalf("unregistered activity = %q", got)

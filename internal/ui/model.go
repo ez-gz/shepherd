@@ -19,13 +19,13 @@ import (
 	"charm.land/lipgloss/v2/compat"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/clipperhouse/uax29/v2/graphemes"
-	"github.com/zamborg/heikou/internal/brief"
-	"github.com/zamborg/heikou/internal/config"
-	"github.com/zamborg/heikou/internal/control"
-	"github.com/zamborg/heikou/internal/format"
-	"github.com/zamborg/heikou/internal/heikou"
-	"github.com/zamborg/heikou/internal/runner"
-	"github.com/zamborg/heikou/internal/workstream"
+	"github.com/ez-gz/shepherd/internal/brief"
+	"github.com/ez-gz/shepherd/internal/config"
+	"github.com/ez-gz/shepherd/internal/control"
+	"github.com/ez-gz/shepherd/internal/format"
+	"github.com/ez-gz/shepherd/internal/runner"
+	"github.com/ez-gz/shepherd/internal/shepherd"
+	"github.com/ez-gz/shepherd/internal/workstream"
 )
 
 const (
@@ -45,11 +45,11 @@ const (
 	// It is a bare control chord rather than an Option or Command combination
 	// on purpose. Ctrl-V arrives as a single C0 byte, so it needs none of the
 	// enhanced key reporting that decides whether a modified arrow reaches
-	// Heikou at all on macOS. The two chords that were also free, Ctrl-L and
+	// Shepherd at all on macOS. The two chords that were also free, Ctrl-L and
 	// Ctrl-Y, both lose to it: Ctrl-L is the key people press twice when a
 	// screen looks wrong, which is the worst possible reflex to put behind a
 	// press-twice confirmation, and Ctrl-Y is macOS's delayed-suspend
-	// character. Pasting on macOS is Command-V and reaches Heikou as a paste
+	// character. Pasting on macOS is Command-V and reaches Shepherd as a paste
 	// event, so Ctrl-V carries no paste reflex here either.
 	archiveChord      = "ctrl+v"
 	archiveChordLabel = "Ctrl-V"
@@ -136,7 +136,7 @@ const (
 type Model struct {
 	controller control.Service
 	root       string
-	backend    heikou.Backend
+	backend    shepherd.Backend
 	store      config.Store
 	settings   config.Config
 
@@ -219,7 +219,7 @@ type Model struct {
 	now func() time.Time
 }
 
-func New(controller control.Service, root string, backend heikou.Backend, store config.Store, settings config.Config) Model {
+func New(controller control.Service, root string, backend shepherd.Backend, store config.Store, settings config.Config) Model {
 	return Model{
 		controller: controller, root: root, backend: backend, store: store, settings: settings,
 		overview: newOverviewModel(control.Snapshot{}), collapsed: make(map[string]bool), rootIndex: make(map[string]int),
@@ -239,7 +239,7 @@ func (m Model) clock() time.Time {
 // NewWithSelectedSession opens the dashboard with a durable session selected
 // once the initial snapshot arrives. It is used by the guided quickstart after
 // the user practices detaching from its directly attached native terminal.
-func NewWithSelectedSession(controller control.Service, root string, backend heikou.Backend, store config.Store, settings config.Config, sessionID string) Model {
+func NewWithSelectedSession(controller control.Service, root string, backend shepherd.Backend, store config.Store, settings config.Config, sessionID string) Model {
 	model := New(controller, root, backend, store, settings)
 	if sessionID = strings.TrimSpace(sessionID); sessionID != "" {
 		model.selected = "session:" + sessionID
@@ -492,7 +492,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if message.err != nil {
 			m.errorText = "attach: " + message.err.Error()
 		} else {
-			m.notice = "detached back to heikou"
+			m.notice = "detached back to shepherd"
 		}
 		return m, m.requestSnapshot()
 
@@ -789,7 +789,7 @@ func (m Model) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		m.selected = ungroupedKey
 		m.restoreSelection()
-		m.notice = "Ungrouped · Ctrl-C to quit heikou"
+		m.notice = "Ungrouped · Ctrl-C to quit shepherd"
 		return m, m.artifactContextCmd(false)
 
 	case "up":
@@ -1526,20 +1526,20 @@ func (m Model) View() tea.View {
 	if m.overlay == overlayHelp {
 		view := tea.NewView(textStyle.MaxWidth(m.width).Render(m.renderHelp()))
 		view.AltScreen = true
-		view.WindowTitle = "heikou · help"
+		view.WindowTitle = "shepherd · help"
 		return view
 	}
 	if m.screen == screenSettings {
 		view := tea.NewView(textStyle.MaxWidth(m.width).Render(m.renderSettings()))
 		view.AltScreen = true
-		view.WindowTitle = "heikou · settings"
+		view.WindowTitle = "shepherd · settings"
 		return view
 	}
 	sections := []string{m.renderHeader(), m.renderRule(), m.renderWorkstreams(), m.renderDetails(), m.renderComposer()}
 	content := textStyle.MaxWidth(m.width).Render(strings.Join(sections, "\n"))
 	view := tea.NewView(clipPane(content, m.width, m.height))
 	view.AltScreen = true
-	view.WindowTitle = "heikou · parallel agents"
+	view.WindowTitle = "shepherd · parallel agents"
 	return view
 }
 
@@ -1572,7 +1572,7 @@ func (m Model) renderHeader() string {
 func (m Model) renderModeHeader(mode, context string) string {
 	mode = format.OneLine(mode)
 	context = format.OneLine(context)
-	brand := lipgloss.NewStyle().Bold(true).Foreground(colorText).Render("heikou")
+	brand := lipgloss.NewStyle().Bold(true).Foreground(colorText).Render("shepherd")
 	left := brand + "  " + modeBadgeStyle.Render(mode)
 	if context == "" {
 		return truncateANSI(left, m.width)
@@ -1952,7 +1952,7 @@ func (m Model) settingsLines() []string {
 		mutedStyle.Render(" any    ") + helpKeyLabel(m.settings.CycleRunnerKey()) + " cycle runner · " + helpKeyLabel(m.settings.CycleRootKey()) + " cycle root",
 		"", lipgloss.NewStyle().Bold(true).Render(" launch commands"),
 	}
-	for _, backend := range []heikou.Backend{heikou.BackendCodex, heikou.BackendClaude} {
+	for _, backend := range []shepherd.Backend{shepherd.BackendCodex, shepherd.BackendClaude} {
 		raw := jsonCommand(m.settings.Command(backend))
 		lines = append(lines, " "+padPlain(string(backend), 9)+truncatePlain(raw, max(1, m.width-11)))
 		resolved, err := runner.ResolveCommand(backend, m.settings.Command(backend))
@@ -1962,7 +1962,7 @@ func (m Model) settingsLines() []string {
 		}
 		lines = append(lines, mutedStyle.Render("   resolved ")+truncatePlain(resolution, max(1, m.width-12)))
 	}
-	lines = append(lines, " "+padPlain(string(heikou.BackendNoAgent), 9)+"tmux default shell")
+	lines = append(lines, " "+padPlain(string(shepherd.BackendNoAgent), 9)+"tmux default shell")
 
 	lines = append(lines, m.briefSettingsLines()...)
 
@@ -2531,11 +2531,11 @@ func tickCmd() tea.Cmd {
 	return tea.Tick(refreshInterval, func(now time.Time) tea.Msg { return tickMsg(now) })
 }
 
-func backendStyle(backend heikou.Backend) lipgloss.Style {
+func backendStyle(backend shepherd.Backend) lipgloss.Style {
 	switch backend {
-	case heikou.BackendClaude:
+	case shepherd.BackendClaude:
 		return lipgloss.NewStyle().Foreground(colorClaude)
-	case heikou.BackendNoAgent:
+	case shepherd.BackendNoAgent:
 		return lipgloss.NewStyle().Foreground(colorNoAgent)
 	default:
 		return lipgloss.NewStyle().Foreground(colorCodex)

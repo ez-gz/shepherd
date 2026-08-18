@@ -18,13 +18,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zamborg/heikou/internal/config"
-	"github.com/zamborg/heikou/internal/control"
-	"github.com/zamborg/heikou/internal/control/controltest"
-	"github.com/zamborg/heikou/internal/format"
-	"github.com/zamborg/heikou/internal/heikou"
-	"github.com/zamborg/heikou/internal/transcript"
-	"github.com/zamborg/heikou/internal/workstream"
+	"github.com/ez-gz/shepherd/internal/config"
+	"github.com/ez-gz/shepherd/internal/control"
+	"github.com/ez-gz/shepherd/internal/control/controltest"
+	"github.com/ez-gz/shepherd/internal/format"
+	"github.com/ez-gz/shepherd/internal/shepherd"
+	"github.com/ez-gz/shepherd/internal/transcript"
+	"github.com/ez-gz/shepherd/internal/workstream"
 )
 
 const (
@@ -90,7 +90,7 @@ func (h *harness) writeTranscriptFor(t *testing.T, id string, lines ...string) {
 func populatedService() *controltest.Stub {
 	created := time.Now().Add(-90 * time.Minute)
 	session := control.Session{
-		ID: testSessionID, Backend: heikou.BackendClaude, Prompt: "ship the parser",
+		ID: testSessionID, Backend: shepherd.BackendClaude, Prompt: "ship the parser",
 		Root: "/tmp/project", CreatedAt: created, WorkstreamID: testWorkstreamID,
 		Status: control.StatusLive, Durable: true,
 	}
@@ -124,42 +124,42 @@ func TestRefusalsNeverReachForAController(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"list rejects a positional", []string{"list", "stray"}, "usage: h list"},
-		{"spawn requires a task", []string{"spawn"}, "usage: h spawn"},
-		{"send requires a message", []string{"send", testSessionID}, "usage: h send"},
-		{"attach takes exactly one session", []string{"attach"}, "usage: h attach"},
-		{"stop takes exactly one session", []string{"stop", "a", "b"}, "usage: h stop"},
-		{"peek takes exactly one session", []string{"peek"}, "usage: h peek"},
-		{"history takes exactly one session", []string{"history"}, "usage: h history"},
-		{"resume requires a message", []string{"resume", testSessionID}, "usage: h resume"},
-		{"conversation takes exactly one session", []string{"conversation"}, "usage: h conversation"},
+		{"list rejects a positional", []string{"list", "stray"}, "usage: shepherd list"},
+		{"spawn requires a task", []string{"spawn"}, "usage: shepherd spawn"},
+		{"send requires a message", []string{"send", testSessionID}, "usage: shepherd send"},
+		{"attach takes exactly one session", []string{"attach"}, "usage: shepherd attach"},
+		{"stop takes exactly one session", []string{"stop", "a", "b"}, "usage: shepherd stop"},
+		{"peek takes exactly one session", []string{"peek"}, "usage: shepherd peek"},
+		{"history takes exactly one session", []string{"history"}, "usage: shepherd history"},
+		{"resume requires a message", []string{"resume", testSessionID}, "usage: shepherd resume"},
+		{"conversation takes exactly one session", []string{"conversation"}, "usage: shepherd conversation"},
 		{"history refuses a negative count", []string{"history", testSessionID, "--last", "-1"}, "cannot be negative"},
 		{"delete demands confirmation", []string{"delete", testSessionID}, "pass --yes to confirm"},
 		{"archive demands confirmation", []string{"ws", "archive", "Parser"}, "pass --yes to confirm"},
-		{"title refuses an empty title", []string{"title", testSessionID}, "usage: h title"},
+		{"title refuses an empty title", []string{"title", testSessionID}, "usage: shepherd title"},
 		{"title refuses two intents at once", []string{"title", testSessionID, "--clear", "new"}, "not both"},
-		{"move demands a destination", []string{"move", testSessionID}, "usage: h move"},
-		{"move refuses two destinations", []string{"move", testSessionID, "-w", "Parser", "--ungrouped"}, "usage: h move"},
-		{"ws create requires a name", []string{"ws", "create"}, "usage: h ws create"},
-		{"ws rename requires a new name", []string{"ws", "rename", "Parser"}, "usage: h ws rename"},
+		{"move demands a destination", []string{"move", testSessionID}, "usage: shepherd move"},
+		{"move refuses two destinations", []string{"move", testSessionID, "-w", "Parser", "--ungrouped"}, "usage: shepherd move"},
+		{"ws create requires a name", []string{"ws", "create"}, "usage: shepherd ws create"},
+		{"ws rename requires a new name", []string{"ws", "rename", "Parser"}, "usage: shepherd ws rename"},
 		{"ws reorder requires a direction", []string{"ws", "reorder", "Parser"}, "--up|--down"},
 		{"ws reorder refuses both directions", []string{"ws", "reorder", "Parser", "--up", "--down"}, "--up|--down"},
 		{"ws root rejects an unknown action", []string{"ws", "root", "flip", "Parser", "/tmp"}, "want add, set, or rm"},
-		{"ws root add needs a directory", []string{"ws", "root", "add", "Parser"}, "usage: h ws root add"},
-		{"an unknown verb names the way out", []string{"frobnicate"}, "run h help"},
-		{"an unknown ws verb names the way out", []string{"ws", "frobnicate"}, "run h help"},
+		{"ws root add needs a directory", []string{"ws", "root", "add", "Parser"}, "usage: shepherd ws root add"},
+		{"an unknown verb names the way out", []string{"frobnicate"}, "run shepherd help"},
+		{"an unknown ws verb names the way out", []string{"ws", "frobnicate"}, "run shepherd help"},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			h := newHarness(t)
 			err := h.app.run(testCase.args)
 			if err == nil {
-				t.Fatalf("h %s succeeded; expected a refusal", strings.Join(testCase.args, " "))
+				t.Fatalf("shepherd %s succeeded; expected a refusal", strings.Join(testCase.args, " "))
 			}
 			if !strings.Contains(err.Error(), testCase.want) {
 				t.Errorf("refusal = %q, want it to contain %q", err.Error(), testCase.want)
 			}
 			if h.dials != 0 {
-				t.Errorf("h %s built a controller before refusing; a bad argument must not need tmux",
+				t.Errorf("shepherd %s built a controller before refusing; a bad argument must not need tmux",
 					strings.Join(testCase.args, " "))
 			}
 			if h.out.Len() != 0 {
@@ -193,7 +193,7 @@ func TestFlagsAreAcceptedAfterPositionals(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			h := newHarness(t)
 			if err := h.app.run(testCase.args); err != nil {
-				t.Fatalf("h %s: %v", strings.Join(testCase.args, " "), err)
+				t.Fatalf("shepherd %s: %v", strings.Join(testCase.args, " "), err)
 			}
 			if h.dials == 0 {
 				t.Error("the command succeeded without reaching the controller, so it did nothing")
@@ -239,7 +239,7 @@ func TestJSONResultsCarryTheKeysThePilotReads(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			h := newHarness(t)
 			if err := h.app.run(testCase.args); err != nil {
-				t.Fatalf("h %s: %v", strings.Join(testCase.args, " "), err)
+				t.Fatalf("shepherd %s: %v", strings.Join(testCase.args, " "), err)
 			}
 			var decoded map[string]any
 			if err := json.Unmarshal(h.out.Bytes(), &decoded); err != nil {
@@ -279,7 +279,7 @@ func TestPeekAlwaysLabelsItsCaptureAsAFrame(t *testing.T) {
 	}
 }
 
-// h list --json is the pilot's main read. Its top level is a snapshot object,
+// shepherd list --json is the pilot's main read. Its top level is a snapshot object,
 // not the per-command result the other verbs return.
 func TestListJSONReportsTheWholeSnapshot(t *testing.T) {
 	h := newHarness(t)
@@ -288,7 +288,7 @@ func TestListJSONReportsTheWholeSnapshot(t *testing.T) {
 	}
 	var snapshot cliSnapshotJSON
 	if err := json.Unmarshal(h.out.Bytes(), &snapshot); err != nil {
-		t.Fatalf("h list --json is not a snapshot: %v", err)
+		t.Fatalf("shepherd list --json is not a snapshot: %v", err)
 	}
 	if snapshot.Revision != 7 {
 		t.Errorf("revision = %d, want 7", snapshot.Revision)
@@ -315,11 +315,11 @@ func TestListTableNamesTheSessionAndItsGroup(t *testing.T) {
 	output := h.out.String()
 	for _, want := range []string{"018f00", "claude", "live", "Parser", "ship the parser"} {
 		if !strings.Contains(output, want) {
-			t.Errorf("h list output is missing %q:\n%s", want, output)
+			t.Errorf("shepherd list output is missing %q:\n%s", want, output)
 		}
 	}
 	if strings.Contains(output, "\x1b") {
-		t.Error("h list emitted an escape sequence")
+		t.Error("shepherd list emitted an escape sequence")
 	}
 }
 
@@ -333,7 +333,7 @@ func TestAnUnreachableControllerFailsTheCommand(t *testing.T) {
 	}
 	err := h.app.run([]string{"list"})
 	if err == nil {
-		t.Fatal("h list succeeded without a controller")
+		t.Fatal("shepherd list succeeded without a controller")
 	}
 	if !strings.Contains(err.Error(), "tmux is required") {
 		t.Errorf("error = %q, want it to name the missing dependency", err)
@@ -376,10 +376,10 @@ func TestVerbsWriteOnlyThroughTheInjectedWriter(t *testing.T) {
 	} {
 		h := newHarness(t)
 		if err := h.app.run(args); err != nil {
-			t.Fatalf("h %s: %v", strings.Join(args, " "), err)
+			t.Fatalf("shepherd %s: %v", strings.Join(args, " "), err)
 		}
 		if h.out.Len() == 0 {
-			t.Errorf("h %s produced no output on the injected writer", strings.Join(args, " "))
+			t.Errorf("shepherd %s produced no output on the injected writer", strings.Join(args, " "))
 		}
 	}
 }
@@ -391,18 +391,18 @@ func TestEmptyStateExplainsItselfRatherThanPrintingNothing(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"list"}, "no heikou sessions"},
-		{[]string{"ws", "list"}, "h ws create"},
+		{[]string{"list"}, "no shepherd sessions"},
+		{[]string{"ws", "list"}, "shepherd ws create"},
 	} {
 		h := newHarness(t)
 		h.service.SnapshotFunc = func(context.Context) (control.Snapshot, error) {
 			return control.Snapshot{}, nil
 		}
 		if err := h.app.run(testCase.args); err != nil {
-			t.Fatalf("h %s: %v", strings.Join(testCase.args, " "), err)
+			t.Fatalf("shepherd %s: %v", strings.Join(testCase.args, " "), err)
 		}
 		if !strings.Contains(h.out.String(), testCase.want) {
-			t.Errorf("h %s on empty state = %q, want it to mention %q",
+			t.Errorf("shepherd %s on empty state = %q, want it to mention %q",
 				strings.Join(testCase.args, " "), h.out.String(), testCase.want)
 		}
 	}
@@ -443,7 +443,7 @@ func TestSpawnCarriesEveryFlagIntoTheStartRequest(t *testing.T) {
 	if captured.Prompt != "ship the parser" {
 		t.Errorf("prompt = %q, want the task alone with no flags folded in", captured.Prompt)
 	}
-	if captured.Backend != heikou.BackendNoAgent {
+	if captured.Backend != shepherd.BackendNoAgent {
 		t.Errorf("runner = %q, want the one -r asked for", captured.Backend)
 	}
 	if captured.Root != "/tmp/elsewhere" {
@@ -535,10 +535,10 @@ func TestHistoryForAResumedSessionReadsTheConversationItContinued(t *testing.T) 
 	)
 	h.service.FindFunc = func(context.Context, string) (control.Session, error) {
 		return control.Session{
-			ID: resumedID, Backend: heikou.BackendClaude, Root: "/tmp/project",
+			ID: resumedID, Backend: shepherd.BackendClaude, Root: "/tmp/project",
 			Status: control.StatusLive, Durable: true,
 			Record: workstream.SessionRecord{
-				ID: resumedID, Backend: heikou.BackendClaude, InitialRoot: "/tmp/project",
+				ID: resumedID, Backend: shepherd.BackendClaude, InitialRoot: "/tmp/project",
 				Conversation: &workstream.Conversation{
 					ID: testSessionID, Source: workstream.ConversationAssigned, RecordedAt: time.Now(),
 				},
@@ -559,14 +559,14 @@ func TestHistoryForAResumedSessionReadsTheConversationItContinued(t *testing.T) 
 	}
 }
 
-// Codex records rollouts under an id it mints itself, so Heikou cannot say
+// Codex records rollouts under an id it mints itself, so Shepherd cannot say
 // which file belongs to this session. That is a different answer from "none
 // was written", and --json has to let a caller tell them apart.
 func TestHistoryDistinguishesAnUnsupportedRunnerFromAMissingFile(t *testing.T) {
 	h := newHarness(t)
 	h.service.FindFunc = func(context.Context, string) (control.Session, error) {
 		return control.Session{
-			ID: testSessionID, Backend: heikou.BackendCodex, Root: "/tmp/project",
+			ID: testSessionID, Backend: shepherd.BackendCodex, Root: "/tmp/project",
 			Status: control.StatusLive, Durable: true,
 		}, nil
 	}
@@ -586,9 +586,9 @@ func TestHistoryDistinguishesAnUnsupportedRunnerFromAMissingFile(t *testing.T) {
 }
 
 // The verb prints the source next to the id, because the two mean different
-// things: one is what Heikou told the runner to use, the other is a match
+// things: one is what Shepherd told the runner to use, the other is a match
 // against files the runner wrote. A reader about to resume needs to know which.
-func TestConversationReportsTheIdAndHowHeikouKnowsIt(t *testing.T) {
+func TestConversationReportsTheIdAndHowShepherdKnowsIt(t *testing.T) {
 	h := newHarness(t)
 	h.service.RegisterConversationFunc = func(context.Context, string) (workstream.Conversation, error) {
 		return workstream.Conversation{
@@ -642,7 +642,7 @@ func TestResumeReportsTheConversationItContinuedAndTheSessionItMade(t *testing.T
 			t.Errorf("resume prompt = %q", prompt)
 		}
 		return control.Session{
-			ID: resumedID, Backend: heikou.BackendClaude, Status: control.StatusLive, Durable: true,
+			ID: resumedID, Backend: shepherd.BackendClaude, Status: control.StatusLive, Durable: true,
 			Record: workstream.SessionRecord{
 				ID: resumedID,
 				Conversation: &workstream.Conversation{
@@ -670,7 +670,7 @@ func TestResumeRefusesASessionWithNoDurableRecord(t *testing.T) {
 	h := newHarness(t)
 	h.service.FindFunc = func(context.Context, string) (control.Session, error) {
 		return control.Session{
-			ID: testSessionID, Backend: heikou.BackendCodex,
+			ID: testSessionID, Backend: shepherd.BackendCodex,
 			Status: control.StatusLive, Orphaned: true, Durable: false,
 		}, nil
 	}

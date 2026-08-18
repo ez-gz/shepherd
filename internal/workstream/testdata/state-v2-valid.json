@@ -5,9 +5,9 @@
     {
       "id": "018f0000-0000-4000-8000-000000000200",
       "name": "Title fixture",
-      "artifact_dir": "/tmp/heikou-v2-artifacts/018f0000-0000-4000-8000-000000000200",
+      "artifact_dir": "/tmp/shepherd-v2-artifacts/018f0000-0000-4000-8000-000000000200",
       "roots": [
-        "/tmp/heikou-v2-root"
+        "/tmp/shepherd-v2-root"
       ],
       "revision": 4,
       "created_at": "2024-02-01T00:00:00Z",
@@ -20,14 +20,14 @@
       "backend": "claude",
       "title": "Release Linux build",
       "initial_prompt": "Prepare and verify the release",
-      "initial_root": "/tmp/heikou-v2-root",
+      "initial_root": "/tmp/shepherd-v2-root",
       "created_at": "2024-02-02T01:02:03Z",
       "launch": {
         "status": "started",
         "binding": {
           "driver": "tmux",
-          "socket": "heikou",
-          "session_name": "h-018f0000-0000-4000-8000-000000000201",
+          "socket": "shepherd",
+          "session_name": "shepherd-018f0000-0000-4000-8000-000000000201",
           "bound_at": "2024-02-02T01:02:04Z"
         }
       }

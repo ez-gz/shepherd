@@ -16,83 +16,40 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/zamborg/heikou/internal/config"
-	"github.com/zamborg/heikou/internal/control"
-	"github.com/zamborg/heikou/internal/env"
-	"github.com/zamborg/heikou/internal/format"
-	"github.com/zamborg/heikou/internal/heikou"
-	"github.com/zamborg/heikou/internal/home"
-	"github.com/zamborg/heikou/internal/runner"
-	"github.com/zamborg/heikou/internal/supervisor"
-	"github.com/zamborg/heikou/internal/transcript"
-	"github.com/zamborg/heikou/internal/ui"
-	"github.com/zamborg/heikou/internal/workstream"
-	learnheikou "github.com/zamborg/heikou/skills/learn-heikou"
+	"github.com/ez-gz/shepherd/internal/config"
+	"github.com/ez-gz/shepherd/internal/control"
+	"github.com/ez-gz/shepherd/internal/env"
+	"github.com/ez-gz/shepherd/internal/format"
+	"github.com/ez-gz/shepherd/internal/runner"
+	"github.com/ez-gz/shepherd/internal/shepherd"
+	"github.com/ez-gz/shepherd/internal/supervisor"
+	"github.com/ez-gz/shepherd/internal/transcript"
+	"github.com/ez-gz/shepherd/internal/ui"
+	"github.com/ez-gz/shepherd/internal/workstream"
+	learnshepherd "github.com/ez-gz/shepherd/skills/learn-shepherd"
 )
 
-var version = "0.7.4"
+var version = "0.7.5"
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "__agent" {
 		if len(os.Args) != 7 {
-			fmt.Fprintln(os.Stderr, "heikou: invalid internal runner invocation")
+			fmt.Fprintln(os.Stderr, "shepherd: invalid internal runner invocation")
 			os.Exit(2)
 		}
 		if err := runner.ExecEncoded(os.Args[2], os.Args[3], os.Args[4], os.Args[5], os.Args[6]); err != nil {
-			fmt.Fprintln(os.Stderr, "heikou:", err)
+			fmt.Fprintln(os.Stderr, "shepherd:", err)
 			os.Exit(127)
 		}
 		return
 	}
 
-	// Relocation runs at the process entry point rather than inside run so the
-	// test surface never migrates a developer's real installation.
-	if err := migrateHome(os.Stderr); err != nil {
-		fmt.Fprintln(os.Stderr, "heikou:", format.OneLine(err.Error()))
-		os.Exit(1)
-	}
-
 	ensurePilotDocs(os.Stderr)
 
 	if err := run(os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, "heikou:", format.OneLine(err.Error()))
+		fmt.Fprintln(os.Stderr, "shepherd:", format.OneLine(err.Error()))
 		os.Exit(1)
 	}
-}
-
-// migrateHome performs the one-time relocation from the pre-0.4 XDG layout into
-// the Heikou home directory. It runs before any command so that no surface ever
-// reads a half-moved installation.
-func migrateHome(writer io.Writer) error {
-	migration, err := home.Migrate()
-	if err != nil {
-		return err
-	}
-	if !migration.Migrated() {
-		return nil
-	}
-	for _, moved := range migration.Home {
-		fmt.Fprintf(writer, "heikou: moved %s to %s\n", moved.From, moved.To)
-	}
-	if migration.LegacyArtifactBase == "" {
-		return nil
-	}
-	store, err := workstream.DefaultStore()
-	if err != nil {
-		return err
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	rebased, err := store.RebaseArtifacts(ctx, migration.LegacyArtifactBase)
-	if err != nil {
-		return fmt.Errorf("repoint workstream artifact directories: %w", err)
-	}
-	if rebased == 1 {
-		fmt.Fprintln(writer, "heikou: repointed 1 workstream artifact directory")
-	} else if rebased > 1 {
-		fmt.Fprintf(writer, "heikou: repointed %d workstream artifact directories\n", rebased)
-	}
-	return nil
 }
 
 // app is everything a command handler needs from the process around it: two
@@ -102,7 +59,7 @@ func migrateHome(writer io.Writer) error {
 // Handlers used to take these from package scope — os.Stdout directly, and a
 // controller each one built for itself out of the environment. That made every
 // verb untestable except by building the binary and running it, which is why
-// the end-to-end suite exists and why cmd/h reported almost no coverage. The
+// the end-to-end suite exists and why cmd/shepherd reported almost no coverage. The
 // suite still earns its keep, because it tests what actually ships. But
 // argument handling, refusal wording and the shape of --json do not need a tmux
 // server to check, and with this struct they no longer ask for one.
@@ -185,7 +142,7 @@ func (a *app) run(args []string) error {
 	case "init":
 		return a.runInit(args[1:])
 	default:
-		return fmt.Errorf("unknown command %q; run h help", args[0])
+		return fmt.Errorf("unknown command %q; run shepherd help", args[0])
 	}
 }
 
@@ -198,7 +155,7 @@ func routeGlobalCommand(args []string, writer io.Writer) bool {
 		printHelp(writer)
 		return true
 	case "version", "--version":
-		fmt.Fprintln(writer, "heikou", version)
+		fmt.Fprintln(writer, "shepherd", version)
 		return true
 	default:
 		return false
@@ -214,7 +171,7 @@ func (a *app) runDashboardSelected(args []string, selectedSessionID string) erro
 	if err != nil {
 		return err
 	}
-	flags := a.newFlagSet("h")
+	flags := a.newFlagSet("shepherd")
 	root := flags.String("root", a.workdir(), "root directory for newly spawned agents")
 	flags.StringVar(root, "C", *root, "root directory for newly spawned agents")
 	runnerValue := flags.String("runner", string(settings.DefaultRunner), "default runner: codex, claude, or no-agent")
@@ -230,7 +187,7 @@ func (a *app) runDashboardSelected(args []string, selectedSessionID string) erro
 	if flags.NArg() != 0 {
 		return fmt.Errorf("unexpected arguments: %s", strings.Join(flags.Args(), " "))
 	}
-	backend, err := heikou.ParseBackend(*runnerValue)
+	backend, err := shepherd.ParseBackend(*runnerValue)
 	if err != nil {
 		return err
 	}
@@ -264,14 +221,14 @@ func (a *app) runDashboardSelected(args []string, selectedSessionID string) erro
 }
 
 func (a *app) runQuickstart(args []string) error {
-	flags := a.newFlagSet("h quickstart")
+	flags := a.newFlagSet("shepherd quickstart")
 	root := flags.String("root", a.workdir(), "project root for the guided session")
 	flags.StringVar(root, "C", *root, "project root for the guided session")
 	runnerValue := flags.String("runner", "", "guide runner: claude or codex (default: prefer claude)")
 	flags.StringVar(runnerValue, "r", *runnerValue, "guide runner: claude or codex (default: prefer claude)")
 	socket := flags.String("socket", defaultSocket(), "private tmux socket name")
 	flags.Usage = func() {
-		fmt.Fprintln(flags.Output(), "Usage: h quickstart [-r claude|codex] [-C DIR]")
+		fmt.Fprintln(flags.Output(), "Usage: shepherd quickstart [-r claude|codex] [-C DIR]")
 		flags.PrintDefaults()
 	}
 	if err := flags.Parse(args); err != nil {
@@ -281,7 +238,7 @@ func (a *app) runQuickstart(args []string) error {
 		return err
 	}
 	if flags.NArg() != 0 {
-		return errors.New("usage: h quickstart [-r claude|codex] [-C dir]")
+		return errors.New("usage: shepherd quickstart [-r claude|codex] [-C dir]")
 	}
 	_, settings, err := a.settings()
 	if err != nil {
@@ -316,13 +273,13 @@ func (a *app) runQuickstart(args []string) error {
 	command, err := controller.AttachCommand(attachContext, session.ID)
 	cancelAttach()
 	if err != nil {
-		return fmt.Errorf("attach guide %s: %w (the session is still available in h)", format.ShortID(session.ID), err)
+		return fmt.Errorf("attach guide %s: %w (the session is still available in shepherd)", format.ShortID(session.ID), err)
 	}
 	if err := command.Run(); err != nil {
-		return fmt.Errorf("attach guide %s: %w (the session is still available in h)", format.ShortID(session.ID), err)
+		return fmt.Errorf("attach guide %s: %w (the session is still available in shepherd)", format.ShortID(session.ID), err)
 	}
 
-	fmt.Fprintln(a.err, "detached · opening heikou with the guide selected")
+	fmt.Fprintln(a.err, "detached · opening shepherd with the guide selected")
 	return a.runDashboardSelected([]string{
 		"--runner", string(backend),
 		"--root", absRoot,
@@ -330,13 +287,13 @@ func (a *app) runQuickstart(args []string) error {
 	}, session.ID)
 }
 
-func quickstartBackend(value string, settings config.Config) (heikou.Backend, error) {
+func quickstartBackend(value string, settings config.Config) (shepherd.Backend, error) {
 	if strings.TrimSpace(value) != "" {
-		backend, err := heikou.ParseBackend(value)
+		backend, err := shepherd.ParseBackend(value)
 		if err != nil {
 			return "", err
 		}
-		if backend == heikou.BackendNoAgent {
+		if backend == shepherd.BackendNoAgent {
 			return "", errors.New("quickstart requires the claude or codex runner")
 		}
 		if _, err := runner.ResolveCommand(backend, settings.Command(backend)); err != nil {
@@ -346,7 +303,7 @@ func quickstartBackend(value string, settings config.Config) (heikou.Backend, er
 	}
 
 	var failures []string
-	for _, backend := range []heikou.Backend{heikou.BackendClaude, heikou.BackendCodex} {
+	for _, backend := range []shepherd.Backend{shepherd.BackendClaude, shepherd.BackendCodex} {
 		if _, err := runner.ResolveCommand(backend, settings.Command(backend)); err == nil {
 			return backend, nil
 		} else {
@@ -357,7 +314,7 @@ func quickstartBackend(value string, settings config.Config) (heikou.Backend, er
 }
 
 func quickstartPrompt() string {
-	return "Guide me through my first Heikou workstream and session. You are running inside the guided session created by h quickstart. Follow the embedded skill below, begin with its in-session path, teach one action at a time, and wait for me after each action.\n\n" + learnheikou.Instructions
+	return "Guide me through my first Shepherd workstream and session. You are running inside the guided session created by shepherd quickstart. Follow the embedded skill below, begin with its in-session path, teach one action at a time, and wait for me after each action.\n\n" + learnshepherd.Instructions
 }
 
 func (a *app) runSpawn(args []string) error {
@@ -365,7 +322,7 @@ func (a *app) runSpawn(args []string) error {
 	if err != nil {
 		return err
 	}
-	flags := a.newFlagSet("h spawn")
+	flags := a.newFlagSet("shepherd spawn")
 	root := flags.String("root", a.workdir(), "agent working directory")
 	flags.StringVar(root, "C", *root, "agent working directory")
 	runnerValue := flags.String("runner", string(settings.DefaultRunner), "runner: codex, claude, or no-agent")
@@ -379,9 +336,9 @@ func (a *app) runSpawn(args []string) error {
 	}
 	prompt := strings.TrimSpace(strings.Join(flags.Args(), " "))
 	if prompt == "" {
-		return errors.New("usage: h spawn [-r codex|claude|no-agent] [-C dir] <task-or-label>; put -- before a task that starts with a dash")
+		return errors.New("usage: shepherd spawn [-r codex|claude|no-agent] [-C dir] <task-or-label>; put -- before a task that starts with a dash")
 	}
-	backend, err := heikou.ParseBackend(*runnerValue)
+	backend, err := shepherd.ParseBackend(*runnerValue)
 	if err != nil {
 		return err
 	}
@@ -408,7 +365,7 @@ func (a *app) runSpawn(args []string) error {
 	if err != nil {
 		return err
 	}
-	name := "h-" + session.ID
+	name := "shepherd-" + session.ID
 	if session.Runtime != nil {
 		name = session.Runtime.Name
 	}
@@ -423,14 +380,14 @@ func (a *app) runSpawn(args []string) error {
 }
 
 func (a *app) runList(args []string) error {
-	flags := a.newFlagSet("h list")
+	flags := a.newFlagSet("shepherd list")
 	socket := flags.String("socket", defaultSocket(), "private tmux socket name")
 	jsonOutput := flags.Bool("json", false, "write a machine-readable snapshot")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if flags.NArg() != 0 {
-		return errors.New("usage: h list")
+		return errors.New("usage: shepherd list")
 	}
 	controller, err := a.dial(*socket)
 	if err != nil {
@@ -446,7 +403,7 @@ func (a *app) runList(args []string) error {
 		return writeJSON(a.out, newCLISnapshot(snapshot))
 	}
 	if len(snapshot.Sessions) == 0 && len(snapshot.Orphans) == 0 {
-		fmt.Fprintln(a.out, "no heikou sessions")
+		fmt.Fprintln(a.out, "no shepherd sessions")
 		return nil
 	}
 	writer := tabwriter.NewWriter(a.out, 0, 4, 2, ' ', 0)
@@ -461,14 +418,14 @@ func (a *app) runList(args []string) error {
 }
 
 func (a *app) runSend(args []string) error {
-	flags := a.newFlagSet("h send")
+	flags := a.newFlagSet("shepherd send")
 	socket := flags.String("socket", defaultSocket(), "private tmux socket name")
 	jsonOutput := flags.Bool("json", false, "write a machine-readable result")
 	if err := parseAnywhere(flags, args); err != nil {
 		return err
 	}
 	if flags.NArg() < 2 {
-		return errors.New("usage: h send <session-id> <message>; put -- before a message that starts with a dash")
+		return errors.New("usage: shepherd send <session-id> <message>; put -- before a message that starts with a dash")
 	}
 	controller, err := a.dial(*socket)
 	if err != nil {
@@ -491,13 +448,13 @@ func (a *app) runSend(args []string) error {
 }
 
 func (a *app) runAttach(args []string) error {
-	flags := a.newFlagSet("h attach")
+	flags := a.newFlagSet("shepherd attach")
 	socket := flags.String("socket", defaultSocket(), "private tmux socket name")
 	if err := parseAnywhere(flags, args); err != nil {
 		return err
 	}
 	if flags.NArg() != 1 {
-		return errors.New("usage: h attach <session-id>")
+		return errors.New("usage: shepherd attach <session-id>")
 	}
 	controller, err := a.dial(*socket)
 	if err != nil {
@@ -518,13 +475,13 @@ func (a *app) runAttach(args []string) error {
 }
 
 func (a *app) runStop(args []string) error {
-	flags := a.newFlagSet("h stop")
+	flags := a.newFlagSet("shepherd stop")
 	socket := flags.String("socket", defaultSocket(), "private tmux socket name")
 	if err := parseAnywhere(flags, args); err != nil {
 		return err
 	}
 	if flags.NArg() != 1 {
-		return errors.New("usage: h stop <session-id>")
+		return errors.New("usage: shepherd stop <session-id>")
 	}
 	controller, err := a.dial(*socket)
 	if err != nil {
@@ -548,13 +505,13 @@ func (a *app) runDoctor(args []string) error {
 	if err != nil {
 		return err
 	}
-	flags := a.newFlagSet("h doctor")
+	flags := a.newFlagSet("shepherd doctor")
 	socket := flags.String("socket", defaultSocket(), "private tmux socket name")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if flags.NArg() != 0 {
-		return errors.New("usage: h doctor")
+		return errors.New("usage: shepherd doctor")
 	}
 	stateStore, err := workstream.DefaultStore()
 	if err != nil {
@@ -563,14 +520,14 @@ func (a *app) runDoctor(args []string) error {
 	checks := []struct {
 		name     string
 		binary   string
-		backend  heikou.Backend
+		backend  shepherd.Backend
 		version  []string
 		required bool
 		runner   bool
 	}{
 		{name: "tmux", binary: "tmux", version: []string{"-V"}, required: true},
-		{name: "codex", backend: heikou.BackendCodex, version: []string{"--version"}, runner: true},
-		{name: "claude", backend: heikou.BackendClaude, version: []string{"--version"}, runner: true},
+		{name: "codex", backend: shepherd.BackendCodex, version: []string{"--version"}, runner: true},
+		{name: "claude", backend: shepherd.BackendClaude, version: []string{"--version"}, runner: true},
 	}
 	failed := false
 	runnersFound := 0
@@ -636,48 +593,48 @@ func (a *app) runDoctor(args []string) error {
 	if failed {
 		return errors.New("required dependencies are missing")
 	}
-	fmt.Fprintln(a.out, "[next]   tour    h quickstart")
+	fmt.Fprintln(a.out, "[next]   tour    shepherd quickstart")
 	return nil
 }
 
 func printHelp(writer io.Writer) {
-	fmt.Fprintln(writer, `heikou — a fast dashboard for parallel native coding agents
+	fmt.Fprintln(writer, `shepherd — a fast dashboard for parallel native coding agents
 
 Usage:
-  h [--runner codex|claude|no-agent] [-C DIR]
+  shepherd [--runner codex|claude|no-agent] [-C DIR]
                                         open the dashboard
-  h quickstart [-r claude|codex] [-C DIR]
+  shepherd quickstart [-r claude|codex] [-C DIR]
                                         launch and attach an agent-guided tour
-  h spawn [--json] [-r RUNNER] [-C DIR] [-w WORKSTREAM] LABEL
+  shepherd spawn [--json] [-r RUNNER] [-C DIR] [-w WORKSTREAM] LABEL
                                         start a session without the dashboard
-  h list [--json]                      list sessions
-  h send [--json] ID MESSAGE           send a follow-up through tmux
-  h attach ID                          enter the native agent terminal
-  h peek ID [--lines N]                print the pane's current frame
-  h history ID [--last N] [--json]     print what the runner recorded happened
-  h conversation ID [--json]           print the runner conversation id Heikou registered
-  h resume [--json] ID MESSAGE         continue that conversation in a new session
-  h stop ID                            stop runtime; keep the durable record
-  h doctor                             check local dependencies
+  shepherd list [--json]                      list sessions
+  shepherd send [--json] ID MESSAGE           send a follow-up through tmux
+  shepherd attach ID                          enter the native agent terminal
+  shepherd peek ID [--lines N]                print the pane's current frame
+  shepherd history ID [--last N] [--json]     print what the runner recorded happened
+  shepherd conversation ID [--json]           print the runner conversation id Shepherd registered
+  shepherd resume [--json] ID MESSAGE         continue that conversation in a new session
+  shepherd stop ID                            stop runtime; keep the durable record
+  shepherd doctor                             check local dependencies
 
 Organize (the same actions the dashboard chords perform, plus roots and archive):
-  h ws list [--json]                   list workstreams, roots, session counts
-  h ws create NAME [-C DIR] [-d DESC]  create a workstream; DIR is its first root
-  h ws rename WS NAME                  rename a workstream
-  h ws reorder WS --up|--down          move it in the dashboard's display order
-  h ws archive WS --yes                archive it; members become Ungrouped
-  h ws root add WS DIR                 register a launch root
-  h ws root set WS OLD NEW             replace a registered root
-  h ws root rm WS DIR                  unregister a root; files are untouched
-  h title ID TITLE | h title ID --clear
+  shepherd ws list [--json]                   list workstreams, roots, session counts
+  shepherd ws create NAME [-C DIR] [-d DESC]  create a workstream; DIR is its first root
+  shepherd ws rename WS NAME                  rename a workstream
+  shepherd ws reorder WS --up|--down          move it in the dashboard's display order
+  shepherd ws archive WS --yes                archive it; members become Ungrouped
+  shepherd ws root add WS DIR                 register a launch root
+  shepherd ws root set WS OLD NEW             replace a registered root
+  shepherd ws root rm WS DIR                  unregister a root; files are untouched
+  shepherd title ID TITLE | shepherd title ID --clear
                                         set or clear a durable session title
-  h move ID --workstream WS|--ungrouped
+  shepherd move ID --workstream WS|--ungrouped
                                         change workstream membership
-  h adopt ID [-w WORKSTREAM]           claim an orphaned tmux pane
-  h delete ID --yes                    delete a durable record with no runtime
+  shepherd adopt ID [-w WORKSTREAM]           claim an orphaned tmux pane
+  shepherd delete ID --yes                    delete a durable record with no runtime
 
 Pilot:
-  h init [--force]                     write the agent instructions into ~/.heikou
+  shepherd init [--force]                     write the agent instructions into ~/.shepherd
 
 Workstreams and sessions accept a full id, an id prefix, or a workstream name.
 
@@ -700,14 +657,14 @@ Dashboard:
   Ctrl-R            rename a workstream or edit/clear a session title
   Ctrl-T            mark a session; Ctrl-T on a workstream moves or adopts it
   Shift-↑/↓         reorder a workstream, or move a session to the next one
-  Ctrl-b d          detach the native terminal back to heikou
+  Ctrl-b d          detach the native terminal back to shepherd
   Ctrl-\            alternate one-chord detach shortcut
   Ctrl-X twice      stop runtime; repeat once pane-free to delete record
   Esc               leave a reply, clear the composer, then select Ungrouped
   Ctrl-C            quit the dashboard; Esc never quits
 
 Composer bindings are configurable in JSON and shown in settings/help.
-Closing heikou never stops agents. Both h and H invoke the same binary.`)
+Closing shepherd never stops agents. The s and S aliases invoke the same binary.`)
 }
 
 func (a *app) newFlagSet(name string) *flag.FlagSet {
@@ -745,8 +702,8 @@ func newController(socket string) (*supervisor.Tmux, *control.Controller, workst
 	if err != nil {
 		return nil, nil, workstream.FileStore{}, err
 	}
-	resolver := control.ResolveCommandFunc(func(_ context.Context, backend heikou.Backend) ([]string, error) {
-		if backend == heikou.BackendNoAgent {
+	resolver := control.ResolveCommandFunc(func(_ context.Context, backend shepherd.Backend) ([]string, error) {
+		if backend == shepherd.BackendNoAgent {
 			return nil, nil
 		}
 		settings, err := configStore.Load()
@@ -765,13 +722,13 @@ func newController(socket string) (*supervisor.Tmux, *control.Controller, workst
 // this launch" from the files the runner wrote.
 //
 // Only Codex ever reaches it. Claude takes --session-id, so its conversation is
-// registered at launch from what Heikou passed and no lookup happens; a runner
+// registered at launch from what Shepherd passed and no lookup happens; a runner
 // that reached here without minting its own id would be answered with a refusal
 // rather than a scan, because scanning for something already known is how a
 // certainty gets downgraded into a guess.
 func conversationResolver(reader transcript.Reader) control.ConversationResolver {
 	return control.ResolveConversationFunc(func(_ context.Context, record workstream.SessionRecord) (string, error) {
-		if record.Backend != heikou.BackendCodex {
+		if record.Backend != shepherd.BackendCodex {
 			return "", fmt.Errorf("runner %s names its own conversation at launch; nothing to resolve", record.Backend)
 		}
 		found, err := reader.FindConversation(transcript.ConversationRequest{
@@ -787,7 +744,7 @@ func conversationResolver(reader transcript.Reader) control.ConversationResolver
 	})
 }
 
-// codexResolveError turns a failed match into a sentence that says what Heikou
+// codexResolveError turns a failed match into a sentence that says what Shepherd
 // looked for and why it will not answer, rather than reporting a bare miss.
 func codexResolveError(err error) error {
 	switch {
@@ -798,7 +755,7 @@ func codexResolveError(err error) error {
 	case errors.Is(err, transcript.ErrConversationAmbiguous):
 		return fmt.Errorf(
 			"more than one codex rollout matches this session's launch directory, start time and initial "+
-				"prompt, so Heikou cannot tell which conversation is this one: %w", err)
+				"prompt, so Shepherd cannot tell which conversation is this one: %w", err)
 	default:
 		return err
 	}
@@ -840,22 +797,22 @@ type cliWorkstreamJSON struct {
 }
 
 type cliSessionJSON struct {
-	ID              string         `json:"id"`
-	Runner          heikou.Backend `json:"runner"`
-	State           string         `json:"state"`
-	Title           string         `json:"title,omitempty"`
-	DisplayTitle    string         `json:"display_title"`
-	InitialPrompt   string         `json:"initial_prompt"`
-	LatestViaHeikou string         `json:"latest_via_heikou,omitempty"`
-	WorkstreamID    string         `json:"workstream_id,omitempty"`
-	Workstream      string         `json:"workstream"`
-	Root            string         `json:"root"`
-	Available       bool           `json:"available"`
-	Alive           bool           `json:"alive"`
-	Orphaned        bool           `json:"orphaned"`
-	ExitCode        *int           `json:"exit_code"`
-	RuntimeSeconds  int64          `json:"runtime_seconds"`
-	LastActivityAt  *time.Time     `json:"last_activity_at,omitempty"`
+	ID                string           `json:"id"`
+	Runner            shepherd.Backend `json:"runner"`
+	State             string           `json:"state"`
+	Title             string           `json:"title,omitempty"`
+	DisplayTitle      string           `json:"display_title"`
+	InitialPrompt     string           `json:"initial_prompt"`
+	LatestViaShepherd string           `json:"latest_via_shepherd,omitempty"`
+	WorkstreamID      string           `json:"workstream_id,omitempty"`
+	Workstream        string           `json:"workstream"`
+	Root              string           `json:"root"`
+	Available         bool             `json:"available"`
+	Alive             bool             `json:"alive"`
+	Orphaned          bool             `json:"orphaned"`
+	ExitCode          *int             `json:"exit_code"`
+	RuntimeSeconds    int64            `json:"runtime_seconds"`
+	LastActivityAt    *time.Time       `json:"last_activity_at,omitempty"`
 }
 
 func newCLISnapshot(snapshot control.Snapshot) cliSnapshotJSON {
@@ -890,8 +847,8 @@ func newCLISnapshot(snapshot control.Snapshot) cliSnapshotJSON {
 		result.Sessions = append(result.Sessions, cliSessionJSON{
 			ID: session.ID, Runner: session.Backend, State: string(session.Status),
 			Title: title, DisplayTitle: displayTitle, InitialPrompt: session.Prompt,
-			LatestViaHeikou: session.LastUserMessage,
-			WorkstreamID:    session.WorkstreamID, Workstream: sessionGroup(snapshot, session),
+			LatestViaShepherd: session.LastUserMessage,
+			WorkstreamID:      session.WorkstreamID, Workstream: sessionGroup(snapshot, session),
 			Root: session.Root, Available: session.Available(), Alive: session.Alive(), Orphaned: session.Orphaned,
 			ExitCode: exitCode, RuntimeSeconds: int64(session.RuntimeDuration(time.Now()).Seconds()),
 			LastActivityAt: lastActivityAt,

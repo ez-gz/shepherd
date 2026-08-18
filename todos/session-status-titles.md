@@ -6,7 +6,7 @@ attention state remain deferred until authoritative runner observations exist.
 Current implementation: state schema v2 stores an optional user-owned session
 title. Rows render a **brief** whose lead is that title, falling back to the
 initial prompt, and whose detail is a bounded runtime preview of the latest user
-message successfully sent through Heikou. This is intentionally not durable chat
+message successfully sent through Shepherd. This is intentionally not durable chat
 history; direct native-TUI input remains unknowable. The durable
 `SessionActivity` design below is still deferred.
 
@@ -18,7 +18,7 @@ and external sources that remain unbuilt.
 
 Step 3 below is now done, and its answer is in
 [runner-activity.md](runner-activity.md). The short version: Claude Code writes
-`~/.claude/sessions/<pid>.json` keyed by the session id Heikou minted, carrying
+`~/.claude/sessions/<pid>.json` keyed by the session id Shepherd minted, carrying
 `status` ∈ `busy`/`shell`/`idle`/`waiting` written on every transition, plus a
 `waitingFor` phrase — `input needed`, `sandbox request`, `dialog open`. That is
 the signal steps 4 and 5 were waiting for. Codex has no equivalent and no
@@ -36,7 +36,7 @@ Make the dashboard answer three different questions without conflating them:
 3. Is there a returned result the user has not opened yet?
 
 At the same time, let users give sessions durable titles and show the most
-recent message routed through Heikou instead of treating the immutable launch
+recent message routed through Shepherd instead of treating the immutable launch
 prompt as the session's forever-label.
 
 ## Honest status model
@@ -88,7 +88,7 @@ Completed:
 3. [x] Make `r` contextual in F3: rename a workstream header or edit/clear a
    session title.
 4. [x] Render title first, falling back to a one-line initial prompt. Keep the
-   latest Heikou-routed message as secondary detail when space permits.
+   latest Shepherd-routed message as secondary detail when space permits.
 5. [x] Keep title metadata out of tmux names, native provider identity, and
    `Supervisor` process truth.
 
@@ -99,7 +99,7 @@ by session ID:
 
 ```text
 SessionActivity
-  last_heikou_user_preview
+  last_shepherd_user_preview
   sent_at
   truncated
   acknowledged_turn_id
@@ -110,8 +110,8 @@ preview should be normalized to one line and capped near 280 characters. Write
 it only after `Supervisor.Send` succeeds. If the send succeeds but persistence
 fails, report the metadata failure and never retry the message automatically.
 
-Call the field **latest via Heikou** in the UI. Messages typed directly inside
-an attached Claude or Codex TUI bypass Heikou and cannot be claimed as known.
+Call the field **latest via Shepherd** in the UI. Messages typed directly inside
+an attached Claude or Codex TUI bypass Shepherd and cannot be claimed as known.
 The initial prompt remains the fallback when no later preview exists.
 
 ## Dashboard and organizer UX
@@ -123,7 +123,7 @@ A dashboard row should prioritize attention state and the user-owned title:
 
 ```text
 ● working    Fix flaky OAuth tests
-              latest via Heikou · “also update the release notes”
+              latest via Shepherd · “also update the release notes”
 
 ◆ returned   Release Linux build
               returned 42s ago
@@ -134,7 +134,7 @@ from the initial prompt without persisting an automatic title. At narrow widths,
 keep status and title before runner details or the message preview.
 
 The details pane should show title, agent state, runtime activity, latest via
-Heikou, initial task, cwd, and the existing terminal preview.
+Shepherd, initial task, cwd, and the existing terminal preview.
 
 In the F3 organizer, `r` now means **rename the selected noun**:
 
@@ -208,4 +208,4 @@ that its turn-start, turn-complete, and input-request signals are reliable.
    supplies stable completed-turn IDs.
 
 The shipped title slice provides useful organization now. Semantic labels and
-the `returned` badge remain deferred until Heikou has sources it can trust.
+the `returned` badge remain deferred until Shepherd has sources it can trust.

@@ -4,7 +4,7 @@ Status: proposed; do not implement as part of V0 settings.
 
 ## The idea
 
-The bottom input in Heikou is the **composer**. Today it has one commit key,
+The bottom input in Shepherd is the **composer**. Today it has one commit key,
 `Enter`, which delivers to whichever destination the composer is aimed at:
 a new session by default, or a session pinned by pressing `Space` on an empty
 composer. It could become a small host for built-in modules that recognize an
@@ -32,7 +32,7 @@ beginning of a fresh composer and remain easy to escape back to literal text.
 
 ## Small architecture
 
-Keep modules compiled into Heikou and registered in order. This is an internal
+Keep modules compiled into Shepherd and registered in order. This is an internal
 UI extension point, not a runtime plugin system.
 
 ```go
@@ -75,7 +75,7 @@ cancellable with `Esc`; dismissing a module must preserve the typed text.
 ## Safety and semantics
 
 - A trigger never implies shell evaluation.
-- Recipe/action arguments remain structured argv or typed Heikou actions.
+- Recipe/action arguments remain structured argv or typed Shepherd actions.
 - Directory results must resolve to real directories before changing root.
 - Modules cannot read terminal transcripts unless their interface explicitly
   receives a user-approved excerpt.

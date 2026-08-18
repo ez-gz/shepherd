@@ -1,7 +1,7 @@
 package brief
 
 // Text normalization for a brief lives in internal/format, which owns the
-// helpers every Heikou surface shares. A brief has the strongest reason of any
+// helpers every Shepherd surface shares. A brief has the strongest reason of any
 // caller to reuse it rather than fork: a configured command's output is
 // untrusted, and "make this safe to print on one line" is exactly the problem
 // that package already solved.

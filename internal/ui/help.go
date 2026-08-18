@@ -91,7 +91,7 @@ func (m Model) renderHelp() string {
 func (m Model) helpContentLines() []string {
 	var lines []string
 	lines = appendHelpParagraph(lines, m.width,
-		"Heikou—‘parallel’ in Japanese—is a local command center for parallel native coding agents. Workstreams provide durable organization while tmux owns terminals and current process observation. Closing the dashboard never stops a runtime.")
+		"Shepherd—‘parallel’ in Japanese—is a local command center for parallel native coding agents. Workstreams provide durable organization while tmux owns terminals and current process observation. Closing the dashboard never stops a runtime.")
 
 	lines = appendHelpSection(lines, m.width, "Nouns")
 	for _, item := range []struct {
@@ -102,11 +102,11 @@ func (m Model) helpContentLines() []string {
 		{"Session", "A durable launch identity with an optional title, initial task, root, runner, and recorded outcome. It remains after its process stops."},
 		{"Runtime", "The tmux pane currently associated with a session. It supplies live process observations and may be live, retained after exit, or unavailable."},
 		{"Root", "An explicitly registered directory used as the working directory for a new launch. A workstream may have several."},
-		{"Runner", "The native program Heikou launches: Codex, Claude, or a no-agent interactive shell."},
+		{"Runner", "The native program Shepherd launches: Codex, Claude, or a no-agent interactive shell."},
 		{"Composer", "The input bar at the bottom of the dashboard. Its prefix names the destination Enter commits to: a new session, or the live session it is aimed at."},
 		{"Brief", m.briefGlossaryDescription()},
 		{"Ungrouped", "Durable sessions that currently have no workstream membership."},
-		{"Orphaned", "tmux panes carrying a Heikou ID that is unknown to durable state. They remain outside workstreams until explicitly adopted."},
+		{"Orphaned", "tmux panes carrying a Shepherd ID that is unknown to durable state. They remain outside workstreams until explicitly adopted."},
 	} {
 		lines = appendHelpDefinition(lines, m.width, item.term, item.description)
 	}
@@ -117,7 +117,7 @@ func (m Model) helpContentLines() []string {
 		description string
 	}{
 		{"Enter · text", "Commit the draft to the destination named in the composer prefix: a new session, or the session being replied to."},
-		{helpKeyLabel(m.settings.ReplyKey()) + " · empty", "Aim the composer at the selected live session and hold the selection there. Its row then shows this newest Heikou-routed message. The pin covers that one message: once it sends, the composer returns to composing a new session, so press this again to follow up."},
+		{helpKeyLabel(m.settings.ReplyKey()) + " · empty", "Aim the composer at the selected live session and hold the selection there. Its row then shows this newest Shepherd-routed message. The pin covers that one message: once it sends, the composer returns to composing a new session, so press this again to follow up."},
 		{helpKeyLabel(m.settings.CycleRunnerKey()), "Cycle Codex, Claude, and no-agent for the next launch, with or without composer text."},
 		{helpKeyLabel(m.settings.CycleRootKey()), "Cycle the registered roots of the selected workstream, with or without composer text."},
 		{"↑ / ↓", "Select a workstream or session; in a multiline composer, move between its logical lines instead. The selection is held while a reply or a rename owns the composer, so the pane below keeps showing what is being answered."},
@@ -146,7 +146,7 @@ func (m Model) helpContentLines() []string {
 	lines = appendHelpParagraph(lines, m.width,
 		"The composer picks its destination before you type, not when you commit. An empty composer starts a new session; pressing the reply key aims it at the selected live session and pins that target. Either way the prefix names the destination and Enter sends there, so the commit key never depends on remembering which one you meant.")
 	lines = appendHelpParagraph(lines, m.width,
-		"The macOS terminal decides which modifier chords reach Heikou. Enhanced Option/Command events and common Alt, Home/End, and Ctrl-key fallbacks are supported; use Ctrl-J when Shift-Enter is reported as ordinary Enter.")
+		"The macOS terminal decides which modifier chords reach Shepherd. Enhanced Option/Command events and common Alt, Home/End, and Ctrl-key fallbacks are supported; use Ctrl-J when Shift-Enter is reported as ordinary Enter.")
 
 	lines = appendHelpSection(lines, m.width, "Organizing")
 	lines = appendHelpParagraph(lines, m.width,
@@ -155,7 +155,7 @@ func (m Model) helpContentLines() []string {
 		key         string
 		description string
 	}{
-		{"Ctrl-N", "Create a workstream, named through the composer. Its first root is the directory Heikou was launched in."},
+		{"Ctrl-N", "Create a workstream, named through the composer. Its first root is the directory Shepherd was launched in."},
 		{"Ctrl-R · workstream", "Rename it. The composer takes the draft, so paste and word motion work as they do anywhere else."},
 		{"Ctrl-R · session", "Edit its durable title. Committing an empty draft clears the title and falls back to the initial task."},
 		{"Ctrl-T · session", "Mark it for a move, or unmark it. The mark shows as ◆ and survives moving the cursor."},
@@ -164,7 +164,7 @@ func (m Model) helpContentLines() []string {
 		{"Shift-↑ / Shift-↓ · session", "Move it to the previous or next workstream, with Ungrouped last in the walk."},
 		{"Ctrl-O", "Edit the selected workstream's roots. The composer opens on the root Shift-Tab has selected; press Ctrl-O again to walk to the next one and then to an empty slot that adds."},
 		{"Ctrl-O · committing", "Enter saves the path shown. An empty draft removes that root and asks once more first; a workstream always keeps its last root."},
-		{archiveChordLabel + " · workstream", "Archive it, which takes it off the dashboard. The first press says what will happen and the second does it; every other key cancels. Archiving is organization rather than deletion or shutdown: no session record is removed and no runtime is stopped, so its sessions carry on running under Ungrouped. h ws archive still does the same thing from the CLI."},
+		{archiveChordLabel + " · workstream", "Archive it, which takes it off the dashboard. The first press says what will happen and the second does it; every other key cancels. Archiving is organization rather than deletion or shutdown: no session record is removed and no runtime is stopped, so its sessions carry on running under Ungrouped. shepherd ws archive still does the same thing from the CLI."},
 		{"Lower pane", "A selected workstream shows its notes.md and a shallow artifact tree; a selected session shows its terminal preview instead. A session resolves to its parent workstream, so moving between them costs no extra read."},
 	} {
 		lines = appendHelpBinding(lines, m.width, binding.key, binding.description)
@@ -178,7 +178,7 @@ func (m Model) helpContentLines() []string {
 
 	lines = appendHelpSection(lines, m.width, "Attached terminal")
 	lines = appendHelpParagraph(lines, m.width,
-		"Attachment enters the native Codex, Claude, or shell terminal. Use Ctrl-\\ or Ctrl-b d to detach back to the same Heikou dashboard. Detaching and quitting Heikou leave the agent running.")
+		"Attachment enters the native Codex, Claude, or shell terminal. Use Ctrl-\\ or Ctrl-b d to detach back to the same Shepherd dashboard. Detaching and quitting Shepherd leave the agent running.")
 	lines = appendHelpParagraph(lines, m.width,
 		"While attached, tmux owns the mouse: dragging selects and copies to the system clipboard, and the wheel scrolls that pane's scrollback. That selection follows the drawn screen, so it stops at the pane and picks up whatever borders an agent's interface draws. Hold Shift while dragging for your terminal's own selection instead, which crosses panes and takes whole lines. iTerm2 uses Option for that rather than Shift.")
 
@@ -187,16 +187,16 @@ func (m Model) helpContentLines() []string {
 		key         string
 		description string
 	}{
-		{"h", "Open the dashboard."},
-		{"h quickstart [-r claude|codex] [-C DIR]", "Launch and attach an agent-guided first-use tour."},
-		{"h spawn [--json] [-r RUNNER] [-C DIR] [-w WORKSTREAM] LABEL", "Start a session without opening the dashboard; --json returns a machine-readable result."},
-		{"h list [--json]", "List durable sessions and orphaned runtimes; --json returns the complete machine-readable projection."},
-		{"h send [--json] ID MESSAGE", "Send a follow-up through tmux; --json returns a machine-readable result."},
-		{"h attach ID", "Enter a session's native terminal."},
-		{"h stop ID", "Stop its runtime and keep the durable record."},
-		{"h doctor", "Check tmux, runners, settings, and local state paths."},
-		{"h version", "Print the installed Heikou version."},
-		{"h help", "Print command-line help."},
+		{"shepherd", "Open the dashboard."},
+		{"shepherd quickstart [-r claude|codex] [-C DIR]", "Launch and attach an agent-guided first-use tour."},
+		{"shepherd spawn [--json] [-r RUNNER] [-C DIR] [-w WORKSTREAM] LABEL", "Start a session without opening the dashboard; --json returns a machine-readable result."},
+		{"shepherd list [--json]", "List durable sessions and orphaned runtimes; --json returns the complete machine-readable projection."},
+		{"shepherd send [--json] ID MESSAGE", "Send a follow-up through tmux; --json returns a machine-readable result."},
+		{"shepherd attach ID", "Enter a session's native terminal."},
+		{"shepherd stop ID", "Stop its runtime and keep the durable record."},
+		{"shepherd doctor", "Check tmux, runners, settings, and local state paths."},
+		{"shepherd version", "Print the installed Shepherd version."},
+		{"shepherd help", "Print command-line help."},
 	} {
 		lines = appendHelpBinding(lines, m.width, binding.key, binding.description)
 	}

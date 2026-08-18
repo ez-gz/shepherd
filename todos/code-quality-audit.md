@@ -24,7 +24,7 @@ tests passed during the audit.
 
 ### P1 · operational reliability
 
-- [ ] Add a redacted, rotating diagnostic log inside the Heikou home directory.
+- [ ] Add a redacted, rotating diagnostic log inside the Shepherd home directory.
   Record operation, version, socket, session ID, duration, exit status, and
   cancellation cause; never record prompts, messages, argv payloads, or
   environment values.
@@ -36,7 +36,7 @@ tests passed during the audit.
   full-screen runner on the alternate screen has no scrollback, so `-S -120`
   yields its visible frame plus whatever normal-screen history preceded it.
   Measured against a live `claude` pane: 85 lines returned, 60 of them shell
-  output produced before the runner started. Heikou's own sessions `exec`
+  output produced before the runner started. Shepherd's own sessions `exec`
   directly and so return the bare frame. Either bound the request to the frame,
   label the preview as a frame rather than a transcript, or both; today the
   request implies a depth the runtime cannot supply.
@@ -55,20 +55,20 @@ tests passed during the audit.
   denied until manager grants are designed.
 - [x] Resolve native runner argv through a trusted config-backed controller
   resolver instead of accepting executable argv in command actions.
-- [x] Add machine-readable `h list --json`, `h spawn --json`, and
-  `h send --json` local CLI surfaces.
+- [x] Add machine-readable `shepherd list --json`, `shepherd spawn --json`, and
+  `shepherd send --json` local CLI surfaces.
 - [ ] Consolidate the remaining lifecycle confirmation fields into typed state
   only if that makes their transitions materially clearer.
 
 ### P2 · hardening
 
-- [ ] Extend `h doctor` with bounded, non-destructive state validation,
+- [ ] Extend `shepherd doctor` with bounded, non-destructive state validation,
   lifecycle-lock, tmux socket, permissions, and diagnostic-log checks.
 - [ ] Bound prompt and follow-up payload sizes before durable storage or tmux
   transport; use a non-argv transport if large prompts become a requirement.
 - [ ] Remove a newly created empty artifact directory when workstream state
   creation fails.
-- [x] Route and test `h --version` before dashboard flag parsing.
+- [x] Route and test `shepherd --version` before dashboard flag parsing.
 - [x] Make selected organizer rows valid UTF-8 and width-safe down to one column.
 - [x] Add deterministic tests for abandoned artifact reads, coalesced polling,
   stale snapshot/preview completion, and unavailable-session previews.
@@ -101,11 +101,11 @@ tests passed during the audit.
 ## Ordered cleanup
 
 1. Add durable redacted diagnostics and typed tmux errors.
-2. Make malformed Heikou pane metadata visible in the normal projection.
+2. Make malformed Shepherd pane metadata visible in the normal projection.
 3. Replace the remaining independent lifecycle confirmation fields only if a
    typed state makes those transitions materially clearer.
 4. Split the large UI file further by screen without building a generic
    framework.
-5. Expand `h doctor` around the real state, lock, tmux, and log boundaries.
+5. Expand `shepherd doctor` around the real state, lock, tmux, and log boundaries.
 6. Add explicit payload limits or a large-prompt transport.
 7. Reconcile failed workstream artifact-directory creation.

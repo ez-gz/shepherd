@@ -9,22 +9,22 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/zamborg/heikou/internal/brief"
-	"github.com/zamborg/heikou/internal/config"
-	"github.com/zamborg/heikou/internal/control"
-	"github.com/zamborg/heikou/internal/heikou"
+	"github.com/ez-gz/shepherd/internal/brief"
+	"github.com/ez-gz/shepherd/internal/config"
+	"github.com/ez-gz/shepherd/internal/control"
+	"github.com/ez-gz/shepherd/internal/shepherd"
 )
 
 // briefTestModel is a dashboard at a fixed width with the default brief
 // configuration, which is what the row assertions below measure.
 func briefTestModel(width int) Model {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.width = width
 	return model
 }
 
 func briefTestSession(title, prompt, latest string) control.Session {
-	session := testDurableSession("018f0000-0000-4000-8000-0000000000b1", "", heikou.BackendClaude, prompt, "/tmp/project", time.Now())
+	session := testDurableSession("018f0000-0000-4000-8000-0000000000b1", "", shepherd.BackendClaude, prompt, "/tmp/project", time.Now())
 	session.Record.Title = title
 	session.LastUserMessage = latest
 	return session
@@ -72,7 +72,7 @@ func TestBriefDropsTheDetailRatherThanShowingAStub(t *testing.T) {
 	}
 }
 
-// The provenance mark is the reason the seam exists: text Heikou was told must
+// The provenance mark is the reason the seam exists: text Shepherd was told must
 // not land unmarked in the columns where text the user typed appears.
 func TestRenderBriefMarksTextThatWasNotProven(t *testing.T) {
 	item := brief.Brief{
@@ -95,7 +95,7 @@ func TestRenderBriefMarksTextThatWasNotProven(t *testing.T) {
 
 func TestBriefDetailLabelFollowsTheSourceThatFilledIt(t *testing.T) {
 	model := briefTestModel(80)
-	if got := model.sessionSecondaryDetail(briefTestSession("Fix OAuth", "investigate", "also the retry")); got != "latest via Heikou · also the retry" {
+	if got := model.sessionSecondaryDetail(briefTestSession("Fix OAuth", "investigate", "also the retry")); got != "latest via Shepherd · also the retry" {
 		t.Fatalf("labelled detail = %q", got)
 	}
 	if got := model.sessionSecondaryDetail(briefTestSession("Fix OAuth", "investigate", "")); got != "initial task · investigate" {
@@ -160,9 +160,9 @@ func briefWidthForRow(width int) int {
 }
 
 // The whole point of the seam: text a configured source reported has to reach
-// the row, carrying the mark that says Heikou was told it rather than saw it.
+// the row, carrying the mark that says Shepherd was told it rather than saw it.
 func TestConfiguredSourceReachesTheRowMarkedApproximate(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.width, model.height = 120, 30
 	model.settings.Brief = config.BriefConfig{
 		Lead:    []string{"status", "title", "prompt"},
@@ -195,7 +195,7 @@ func TestConfiguredSourceReachesTheRowMarkedApproximate(t *testing.T) {
 // message, so a row on a machine nobody has configured shows what the session
 // is doing rather than what it was last told.
 func TestTheDefaultDetailPrefersWhatTheRunnerIsDoing(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendClaude)
+	model, _ := newTestModel("/tmp", shepherd.BackendClaude)
 	model.width, model.height = 120, 30
 	model.settings.Brief = config.Default().Brief
 
@@ -226,7 +226,7 @@ func TestTheDefaultDetailPrefersWhatTheRunnerIsDoing(t *testing.T) {
 
 // Reloading settings must not leave a removed source's text on screen.
 func TestReloadingSettingsDropsARemovedSourcesText(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.width, model.height = 120, 30
 	model.settings.Brief = config.BriefConfig{
 		Lead:    []string{"status", "title"},
@@ -255,7 +255,7 @@ func TestReloadingSettingsDropsARemovedSourcesText(t *testing.T) {
 // are only cleared by the next keystroke. A background observation pass writing
 // there would wipe the result of the user's last action every interval.
 func TestBriefPassesDoNotOverwriteWhatTheUserJustDid(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.width, model.height = 120, 30
 	model.notice = "renamed workstream"
 	model.errorText = "delete refused while a pane remains"
@@ -277,7 +277,7 @@ func TestBriefPassesDoNotOverwriteWhatTheUserJustDid(t *testing.T) {
 // It still has to be visible somewhere, or a capped pass reads as full coverage
 // and a broken command reads as a source with nothing to say.
 func TestBriefSourceHealthIsVisibleInSettings(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.width, model.height = 120, 40
 	model.settings.Brief = config.BriefConfig{
 		Lead:    []string{"status", "title"},

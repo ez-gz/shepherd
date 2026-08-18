@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zamborg/heikou/internal/heikou"
-	"github.com/zamborg/heikou/internal/workstream"
+	"github.com/ez-gz/shepherd/internal/shepherd"
+	"github.com/ez-gz/shepherd/internal/workstream"
 )
 
 type memoryRepository struct {
@@ -61,19 +61,19 @@ func (r *memoryRepository) WithLifecycleLock(_ context.Context, operation func()
 
 type fakeSupervisor struct {
 	mu       sync.Mutex
-	sessions []heikou.Session
-	start    func(heikou.StartRequest) (heikou.Session, error)
+	sessions []shepherd.Session
+	start    func(shepherd.StartRequest) (shepherd.Session, error)
 	exists   func(string, string) (bool, error)
 	stopErr  error
 }
 
 func (f *fakeSupervisor) Bootstrap(context.Context) error { return nil }
-func (f *fakeSupervisor) Sessions(context.Context) ([]heikou.Session, error) {
+func (f *fakeSupervisor) Sessions(context.Context) ([]shepherd.Session, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]heikou.Session(nil), f.sessions...), nil
+	return append([]shepherd.Session(nil), f.sessions...), nil
 }
-func (f *fakeSupervisor) Find(_ context.Context, query string) (heikou.Session, error) {
+func (f *fakeSupervisor) Find(_ context.Context, query string) (shepherd.Session, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for _, session := range f.sessions {
@@ -81,7 +81,7 @@ func (f *fakeSupervisor) Find(_ context.Context, query string) (heikou.Session, 
 			return session, nil
 		}
 	}
-	return heikou.Session{}, errors.New("not found")
+	return shepherd.Session{}, errors.New("not found")
 }
 func (f *fakeSupervisor) RuntimeExists(_ context.Context, id, boundName string) (bool, error) {
 	if f.exists != nil {
@@ -90,23 +90,23 @@ func (f *fakeSupervisor) RuntimeExists(_ context.Context, id, boundName string) 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for _, session := range f.sessions {
-		if session.ID == id || session.Name == boundName || session.Name == "h-"+id {
+		if session.ID == id || session.Name == boundName || session.Name == "shepherd-"+id {
 			return true, nil
 		}
 	}
 	return false, nil
 }
-func (f *fakeSupervisor) Start(_ context.Context, request heikou.StartRequest) (heikou.Session, error) {
+func (f *fakeSupervisor) Start(_ context.Context, request shepherd.StartRequest) (shepherd.Session, error) {
 	if f.start != nil {
 		return f.start(request)
 	}
-	return heikou.Session{}, errors.New("start failed")
+	return shepherd.Session{}, errors.New("start failed")
 }
-func (f *fakeSupervisor) Send(context.Context, heikou.Session, string) error { return nil }
-func (f *fakeSupervisor) Capture(context.Context, heikou.Session, int) (string, error) {
+func (f *fakeSupervisor) Send(context.Context, shepherd.Session, string) error { return nil }
+func (f *fakeSupervisor) Capture(context.Context, shepherd.Session, int) (string, error) {
 	return "", nil
 }
-func (f *fakeSupervisor) Stop(_ context.Context, session heikou.Session) error {
+func (f *fakeSupervisor) Stop(_ context.Context, session shepherd.Session) error {
 	if f.stopErr != nil {
 		return f.stopErr
 	}
@@ -121,12 +121,12 @@ func (f *fakeSupervisor) Stop(_ context.Context, session heikou.Session) error {
 	f.sessions = remaining
 	return nil
 }
-func (f *fakeSupervisor) AttachCommand(heikou.Session) *exec.Cmd { return exec.Command("true") }
+func (f *fakeSupervisor) AttachCommand(shepherd.Session) *exec.Cmd { return exec.Command("true") }
 
 func TestReorderWorkstreamPersistsVisibleOrderAndSkipsArchived(t *testing.T) {
 	root := t.TempDir()
 	repository := newMemoryRepository(root)
-	controller := New(&fakeSupervisor{}, repository, "heikou-test")
+	controller := New(&fakeSupervisor{}, repository, "shepherd-test")
 
 	var items []workstream.Workstream
 	for _, name := range []string{"Alpha", "Archived", "Charlie", "Delta"} {
@@ -187,14 +187,14 @@ func TestStartPersistsPendingIdentityBeforeSupervisorAndBindsSuccess(t *testing.
 	root := t.TempDir()
 	repository := newMemoryRepository(root)
 	supervisor := &fakeSupervisor{}
-	controller := New(supervisor, repository, "heikou-test")
+	controller := New(supervisor, repository, "shepherd-test")
 	controller.now = func() time.Time { return time.Unix(1_700_000_000, 0).UTC() }
 	container, err := controller.CreateWorkstream(context.Background(), "Core", "", []string{root})
 	if err != nil {
 		t.Fatal(err)
 	}
 	prompt := "\tbuild it\n  exactly\n"
-	supervisor.start = func(request heikou.StartRequest) (heikou.Session, error) {
+	supervisor.start = func(request shepherd.StartRequest) (shepherd.Session, error) {
 		state, loadErr := repository.Load(context.Background())
 		if loadErr != nil {
 			t.Fatal(loadErr)
@@ -209,15 +209,15 @@ func TestStartPersistsPendingIdentityBeforeSupervisorAndBindsSuccess(t *testing.
 		if request.Prompt != prompt || record.InitialPrompt != prompt {
 			t.Fatalf("prompt was not preserved: request=%q record=%q", request.Prompt, record.InitialPrompt)
 		}
-		runtime := heikou.Session{ID: request.ID, Name: "h-" + request.ID, PaneID: "%1", Backend: request.Backend, Prompt: request.Prompt, Root: request.Root, Status: heikou.StatusLive, StartedAt: controller.now()}
+		runtime := shepherd.Session{ID: request.ID, Name: "shepherd-" + request.ID, PaneID: "%1", Backend: request.Backend, Prompt: request.Prompt, Root: request.Root, Status: shepherd.StatusLive, StartedAt: controller.now()}
 		supervisor.sessions = append(supervisor.sessions, runtime)
 		return runtime, nil
 	}
-	session, err := controller.Start(context.Background(), StartRequest{Backend: heikou.BackendCodex, Prompt: prompt, Root: root, WorkstreamID: container.ID})
+	session, err := controller.Start(context.Background(), StartRequest{Backend: shepherd.BackendCodex, Prompt: prompt, Root: root, WorkstreamID: container.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !session.Alive() || session.Record.Launch.Binding == nil || session.Record.Launch.Binding.Socket != "heikou-test" {
+	if !session.Alive() || session.Record.Launch.Binding == nil || session.Record.Launch.Binding.Socket != "shepherd-test" {
 		t.Fatalf("successful projection = %#v", session)
 	}
 	if session.Prompt != prompt || session.Record.InitialPrompt != prompt {
@@ -228,12 +228,12 @@ func TestStartPersistsPendingIdentityBeforeSupervisorAndBindsSuccess(t *testing.
 func TestFailedStartKeepsRecordMembershipAndOutcome(t *testing.T) {
 	root := t.TempDir()
 	repository := newMemoryRepository(root)
-	controller := New(&fakeSupervisor{}, repository, "heikou-test")
+	controller := New(&fakeSupervisor{}, repository, "shepherd-test")
 	container, err := controller.CreateWorkstream(context.Background(), "Core", "", []string{root})
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := controller.Start(context.Background(), StartRequest{Backend: heikou.BackendClaude, Prompt: "fail safely", Root: root, WorkstreamID: container.ID})
+	session, err := controller.Start(context.Background(), StartRequest{Backend: shepherd.BackendClaude, Prompt: "fail safely", Root: root, WorkstreamID: container.ID})
 	if err == nil {
 		t.Fatal("Start succeeded")
 	}
@@ -262,7 +262,7 @@ func TestReconciliationIsConservativeAndFindsOrphans(t *testing.T) {
 	}
 	_, err := repository.Mutate(context.Background(), func(state *workstream.State) (bool, error) {
 		for _, id := range ids[:3] {
-			state.Sessions = append(state.Sessions, workstream.SessionRecord{ID: id, Backend: heikou.BackendCodex, InitialPrompt: id, InitialRoot: root, CreatedAt: now.Add(-time.Minute), Launch: workstream.LaunchIntent{Status: workstream.LaunchPending}})
+			state.Sessions = append(state.Sessions, workstream.SessionRecord{ID: id, Backend: shepherd.BackendCodex, InitialPrompt: id, InitialRoot: root, CreatedAt: now.Add(-time.Minute), Launch: workstream.LaunchIntent{Status: workstream.LaunchPending}})
 		}
 		return true, nil
 	})
@@ -270,12 +270,12 @@ func TestReconciliationIsConservativeAndFindsOrphans(t *testing.T) {
 		t.Fatal(err)
 	}
 	exitCode := 7
-	supervisor := &fakeSupervisor{sessions: []heikou.Session{
-		{ID: ids[0], Name: "h-" + ids[0], Backend: heikou.BackendCodex, Status: heikou.StatusLive, StartedAt: now.Add(-time.Minute)},
-		{ID: ids[1], Name: "h-" + ids[1], Backend: heikou.BackendCodex, Status: heikou.StatusFailed, ExitCode: &exitCode, StartedAt: now.Add(-time.Minute), EndedAt: now},
-		{ID: ids[3], Name: "h-" + ids[3], Backend: heikou.BackendClaude, Status: heikou.StatusLive, StartedAt: now},
+	supervisor := &fakeSupervisor{sessions: []shepherd.Session{
+		{ID: ids[0], Name: "shepherd-" + ids[0], Backend: shepherd.BackendCodex, Status: shepherd.StatusLive, StartedAt: now.Add(-time.Minute)},
+		{ID: ids[1], Name: "shepherd-" + ids[1], Backend: shepherd.BackendCodex, Status: shepherd.StatusFailed, ExitCode: &exitCode, StartedAt: now.Add(-time.Minute), EndedAt: now},
+		{ID: ids[3], Name: "shepherd-" + ids[3], Backend: shepherd.BackendClaude, Status: shepherd.StatusLive, StartedAt: now},
 	}}
-	controller := New(supervisor, repository, "heikou-test")
+	controller := New(supervisor, repository, "shepherd-test")
 	controller.now = func() time.Time { return now }
 	snapshot, err := controller.Snapshot(context.Background())
 	if err != nil {
@@ -320,7 +320,7 @@ func TestDeadRuntimeWithUnknownExitCodeNeverBecomesGuessedSuccess(t *testing.T) 
 	id := "018f0000-0000-4000-8000-000000000025"
 	_, err := repository.Mutate(context.Background(), func(state *workstream.State) (bool, error) {
 		state.Sessions = append(state.Sessions, workstream.SessionRecord{
-			ID: id, Backend: heikou.BackendCodex, InitialPrompt: "unknown outcome",
+			ID: id, Backend: shepherd.BackendCodex, InitialPrompt: "unknown outcome",
 			InitialRoot: root, CreatedAt: now.Add(-time.Minute),
 			Launch:  workstream.LaunchIntent{Status: workstream.LaunchPending},
 			Outcome: &workstream.Outcome{Kind: workstream.OutcomeStartFailed, Error: "ambiguous launch", RecordedAt: now.Add(-30 * time.Second)},
@@ -330,12 +330,12 @@ func TestDeadRuntimeWithUnknownExitCodeNeverBecomesGuessedSuccess(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	supervisor := &fakeSupervisor{sessions: []heikou.Session{{
-		ID: id, Name: "h-" + id, Backend: heikou.BackendCodex,
-		Status: heikou.StatusExited, ExitCode: nil,
+	supervisor := &fakeSupervisor{sessions: []shepherd.Session{{
+		ID: id, Name: "shepherd-" + id, Backend: shepherd.BackendCodex,
+		Status: shepherd.StatusExited, ExitCode: nil,
 		StartedAt: now.Add(-time.Minute),
 	}}}
-	controller := New(supervisor, repository, "heikou-test")
+	controller := New(supervisor, repository, "shepherd-test")
 	controller.now = func() time.Time { return now }
 
 	snapshot, err := controller.Snapshot(context.Background())
@@ -376,10 +376,10 @@ func TestSetSessionTitleNormalizesClearsAndPreservesRuntimeIdentity(t *testing.T
 	id := "018f0000-0000-4000-8000-000000000026"
 	_, err := repository.Mutate(context.Background(), func(state *workstream.State) (bool, error) {
 		state.Sessions = append(state.Sessions, workstream.SessionRecord{
-			ID: id, Backend: heikou.BackendClaude, InitialPrompt: "immutable launch prompt",
+			ID: id, Backend: shepherd.BackendClaude, InitialPrompt: "immutable launch prompt",
 			InitialRoot: root, CreatedAt: time.Now(),
 			Launch: workstream.LaunchIntent{Status: workstream.LaunchStarted, Binding: &workstream.RuntimeBinding{
-				Driver: "tmux", Socket: "heikou-test", SessionName: "h-" + id, BoundAt: time.Now(),
+				Driver: "tmux", Socket: "shepherd-test", SessionName: "shepherd-" + id, BoundAt: time.Now(),
 			}},
 		})
 		return true, nil
@@ -387,7 +387,7 @@ func TestSetSessionTitleNormalizesClearsAndPreservesRuntimeIdentity(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	controller := New(&fakeSupervisor{}, repository, "heikou-test")
+	controller := New(&fakeSupervisor{}, repository, "shepherd-test")
 	if err := controller.SetSessionTitle(context.Background(), id, "  Release\n  Linux\tbuild  "); err != nil {
 		t.Fatal(err)
 	}
@@ -399,7 +399,7 @@ func TestSetSessionTitleNormalizesClearsAndPreservesRuntimeIdentity(t *testing.T
 	if record.Title != "Release Linux build" {
 		t.Fatalf("title = %q, want canonical display title", record.Title)
 	}
-	if record.InitialPrompt != "immutable launch prompt" || record.Launch.Binding.SessionName != "h-"+id {
+	if record.InitialPrompt != "immutable launch prompt" || record.Launch.Binding.SessionName != "shepherd-"+id {
 		t.Fatalf("title changed launch identity: %#v", record)
 	}
 	revision := state.Revision
@@ -426,15 +426,15 @@ func TestStopRecordsOutcomeOnlyAfterTmuxKillSucceeds(t *testing.T) {
 	id := "018f0000-0000-4000-8000-000000000031"
 	now := time.Now()
 	_, err := repository.Mutate(context.Background(), func(state *workstream.State) (bool, error) {
-		state.Sessions = append(state.Sessions, workstream.SessionRecord{ID: id, Backend: heikou.BackendCodex, InitialPrompt: "stop me", InitialRoot: root, CreatedAt: now, Launch: workstream.LaunchIntent{Status: workstream.LaunchPending}})
+		state.Sessions = append(state.Sessions, workstream.SessionRecord{ID: id, Backend: shepherd.BackendCodex, InitialPrompt: "stop me", InitialRoot: root, CreatedAt: now, Launch: workstream.LaunchIntent{Status: workstream.LaunchPending}})
 		return true, nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime := heikou.Session{ID: id, Name: "h-" + id, PaneID: "%1", Backend: heikou.BackendCodex, Status: heikou.StatusLive, StartedAt: now}
-	supervisor := &fakeSupervisor{sessions: []heikou.Session{runtime}, stopErr: errors.New("kill failed")}
-	controller := New(supervisor, repository, "heikou-test")
+	runtime := shepherd.Session{ID: id, Name: "shepherd-" + id, PaneID: "%1", Backend: shepherd.BackendCodex, Status: shepherd.StatusLive, StartedAt: now}
+	supervisor := &fakeSupervisor{sessions: []shepherd.Session{runtime}, stopErr: errors.New("kill failed")}
+	controller := New(supervisor, repository, "shepherd-test")
 	if err := controller.Stop(context.Background(), id); err == nil {
 		t.Fatal("failed kill was reported as success")
 	}
@@ -461,27 +461,27 @@ func TestDeleteSessionRefusesAnyRetainedRuntime(t *testing.T) {
 
 	for _, test := range []struct {
 		name   string
-		status heikou.Status
+		status shepherd.Status
 	}{
-		{name: "live pane", status: heikou.StatusLive},
-		{name: "dead retained pane", status: heikou.StatusExited},
+		{name: "live pane", status: shepherd.StatusLive},
+		{name: "dead retained pane", status: shepherd.StatusExited},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			repository := newMemoryRepository(root)
-			controller := New(&fakeSupervisor{sessions: []heikou.Session{{
-				ID: id, Name: "h-" + id, Backend: heikou.BackendCodex, Status: test.status,
-			}}}, repository, "heikou-test")
+			controller := New(&fakeSupervisor{sessions: []shepherd.Session{{
+				ID: id, Name: "shepherd-" + id, Backend: shepherd.BackendCodex, Status: test.status,
+			}}}, repository, "shepherd-test")
 			container, err := controller.CreateWorkstream(context.Background(), "Core", "", []string{root})
 			if err != nil {
 				t.Fatal(err)
 			}
 			_, err = repository.Mutate(context.Background(), func(state *workstream.State) (bool, error) {
 				state.Sessions = append(state.Sessions, workstream.SessionRecord{
-					ID: id, Backend: heikou.BackendCodex, InitialPrompt: "keep me", InitialRoot: root,
+					ID: id, Backend: shepherd.BackendCodex, InitialPrompt: "keep me", InitialRoot: root,
 					CreatedAt: now, Launch: workstream.LaunchIntent{
 						Status: workstream.LaunchStarted,
 						Binding: &workstream.RuntimeBinding{
-							Driver: "tmux", Socket: "heikou-test", SessionName: "h-" + id, BoundAt: now,
+							Driver: "tmux", Socket: "shepherd-test", SessionName: "shepherd-" + id, BoundAt: now,
 						},
 					},
 				})
@@ -523,7 +523,7 @@ func TestDeleteSessionRemovesAbsentRuntimeRecordAndMembership(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			repository := newMemoryRepository(root)
-			controller := New(&fakeSupervisor{}, repository, "heikou-test")
+			controller := New(&fakeSupervisor{}, repository, "shepherd-test")
 			container, err := controller.CreateWorkstream(context.Background(), "Core", "", []string{root})
 			if err != nil {
 				t.Fatal(err)
@@ -531,7 +531,7 @@ func TestDeleteSessionRemovesAbsentRuntimeRecordAndMembership(t *testing.T) {
 			id := "018f0000-0000-4000-8000-00000000004" + string(rune('1'+index))
 			_, err = repository.Mutate(context.Background(), func(state *workstream.State) (bool, error) {
 				state.Sessions = append(state.Sessions, workstream.SessionRecord{
-					ID: id, Backend: heikou.BackendClaude, InitialPrompt: "delete me", InitialRoot: root,
+					ID: id, Backend: shepherd.BackendClaude, InitialPrompt: "delete me", InitialRoot: root,
 					CreatedAt: now, Launch: workstream.LaunchIntent{Status: workstream.LaunchPending}, Outcome: test.outcome,
 				})
 				state.Memberships = append(state.Memberships, workstream.Membership{
@@ -569,7 +569,7 @@ func TestDeleteSessionRefusesUnboundPendingLaunchWithUnknownSocket(t *testing.T)
 	repository := newMemoryRepository(root)
 	before, err := repository.Mutate(context.Background(), func(state *workstream.State) (bool, error) {
 		state.Sessions = append(state.Sessions, workstream.SessionRecord{
-			ID: id, Backend: heikou.BackendCodex, InitialPrompt: "ambiguous launch", InitialRoot: root,
+			ID: id, Backend: shepherd.BackendCodex, InitialPrompt: "ambiguous launch", InitialRoot: root,
 			CreatedAt: now, Launch: workstream.LaunchIntent{Status: workstream.LaunchPending},
 		})
 		return true, nil
@@ -600,7 +600,7 @@ func TestDeleteSessionRefusesUnboundPendingLaunchWithUnknownSocket(t *testing.T)
 
 func TestDeleteSessionRejectsUnknownID(t *testing.T) {
 	repository := newMemoryRepository(t.TempDir())
-	controller := New(&fakeSupervisor{}, repository, "heikou-test")
+	controller := New(&fakeSupervisor{}, repository, "shepherd-test")
 	before, err := repository.Load(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -625,11 +625,11 @@ func TestDeleteSessionFailsClosedForPlausibleUnprojectableRuntime(t *testing.T) 
 	repository := newMemoryRepository(root)
 	_, err := repository.Mutate(context.Background(), func(state *workstream.State) (bool, error) {
 		state.Sessions = append(state.Sessions, workstream.SessionRecord{
-			ID: id, Backend: heikou.BackendCodex, InitialPrompt: "keep partial runtime", InitialRoot: root,
+			ID: id, Backend: shepherd.BackendCodex, InitialPrompt: "keep partial runtime", InitialRoot: root,
 			CreatedAt: now, Launch: workstream.LaunchIntent{
 				Status: workstream.LaunchStarted,
 				Binding: &workstream.RuntimeBinding{
-					Driver: "tmux", Socket: "heikou-test", SessionName: "h-" + id, BoundAt: now,
+					Driver: "tmux", Socket: "shepherd-test", SessionName: "shepherd-" + id, BoundAt: now,
 				},
 			},
 		})
@@ -639,12 +639,12 @@ func TestDeleteSessionFailsClosedForPlausibleUnprojectableRuntime(t *testing.T) 
 		t.Fatal(err)
 	}
 	supervisor := &fakeSupervisor{exists: func(gotID, gotName string) (bool, error) {
-		if gotID != id || gotName != "h-"+id {
+		if gotID != id || gotName != "shepherd-"+id {
 			t.Fatalf("RuntimeExists(%q, %q)", gotID, gotName)
 		}
 		return true, nil
 	}}
-	controller := New(supervisor, repository, "heikou-test")
+	controller := New(supervisor, repository, "shepherd-test")
 	if err := controller.DeleteSession(context.Background(), id); err == nil || !strings.Contains(err.Error(), "runtime exists") {
 		t.Fatalf("DeleteSession() error = %v", err)
 	}
@@ -664,10 +664,10 @@ func TestDeleteSessionRefusesDifferentBoundSocket(t *testing.T) {
 	repository := newMemoryRepository(root)
 	_, err := repository.Mutate(context.Background(), func(state *workstream.State) (bool, error) {
 		state.Sessions = append(state.Sessions, workstream.SessionRecord{
-			ID: id, Backend: heikou.BackendClaude, InitialPrompt: "bound elsewhere", InitialRoot: root,
+			ID: id, Backend: shepherd.BackendClaude, InitialPrompt: "bound elsewhere", InitialRoot: root,
 			CreatedAt: now,
 			Launch: workstream.LaunchIntent{Status: workstream.LaunchStarted, Binding: &workstream.RuntimeBinding{
-				Driver: "tmux", Socket: "socket-a", SessionName: "h-" + id, BoundAt: now,
+				Driver: "tmux", Socket: "socket-a", SessionName: "shepherd-" + id, BoundAt: now,
 			}},
 		})
 		return true, nil
@@ -696,10 +696,10 @@ func TestDeleteSessionRefusesDifferentBoundSocket(t *testing.T) {
 func TestDeleteSessionRejectsOrphanedRuntime(t *testing.T) {
 	id := "018f0000-0000-4000-8000-000000000052"
 	repository := newMemoryRepository(t.TempDir())
-	supervisor := &fakeSupervisor{sessions: []heikou.Session{{
-		ID: id, Name: "h-" + id, Backend: heikou.BackendCodex, Status: heikou.StatusLive,
+	supervisor := &fakeSupervisor{sessions: []shepherd.Session{{
+		ID: id, Name: "shepherd-" + id, Backend: shepherd.BackendCodex, Status: shepherd.StatusLive,
 	}}}
-	controller := New(supervisor, repository, "heikou-test")
+	controller := New(supervisor, repository, "shepherd-test")
 	if err := controller.DeleteSession(context.Background(), id); err == nil {
 		t.Fatal("DeleteSession accepted an orphaned runtime")
 	}
@@ -720,16 +720,16 @@ func TestDeleteSessionCannotRaceAConcurrentStartIntoAnOrphan(t *testing.T) {
 	root := t.TempDir()
 	repository := newMemoryRepository(root)
 	supervisor := &fakeSupervisor{}
-	starter := New(supervisor, repository, "heikou-test")
-	deleter := New(supervisor, repository, "heikou-test")
-	requestSeen := make(chan heikou.StartRequest, 1)
+	starter := New(supervisor, repository, "shepherd-test")
+	deleter := New(supervisor, repository, "shepherd-test")
+	requestSeen := make(chan shepherd.StartRequest, 1)
 	releaseStart := make(chan struct{})
-	supervisor.start = func(request heikou.StartRequest) (heikou.Session, error) {
+	supervisor.start = func(request shepherd.StartRequest) (shepherd.Session, error) {
 		requestSeen <- request
 		<-releaseStart
-		runtime := heikou.Session{
-			ID: request.ID, Name: "h-" + request.ID, PaneID: "%9", Backend: request.Backend,
-			Prompt: request.Prompt, Root: request.Root, Status: heikou.StatusLive, StartedAt: time.Now().UTC(),
+		runtime := shepherd.Session{
+			ID: request.ID, Name: "shepherd-" + request.ID, PaneID: "%9", Backend: request.Backend,
+			Prompt: request.Prompt, Root: request.Root, Status: shepherd.StatusLive, StartedAt: time.Now().UTC(),
 		}
 		supervisor.mu.Lock()
 		supervisor.sessions = append(supervisor.sessions, runtime)
@@ -745,7 +745,7 @@ func TestDeleteSessionCannotRaceAConcurrentStartIntoAnOrphan(t *testing.T) {
 	}
 	started := make(chan startResult, 1)
 	go func() {
-		session, err := starter.Start(ctx, StartRequest{Backend: heikou.BackendCodex, Prompt: "launch", Root: root})
+		session, err := starter.Start(ctx, StartRequest{Backend: shepherd.BackendCodex, Prompt: "launch", Root: root})
 		started <- startResult{session: session, err: err}
 	}()
 	request := <-requestSeen
@@ -778,13 +778,13 @@ func TestPositiveRuntimeEvidenceWinsOverAmbiguousStartError(t *testing.T) {
 	root := t.TempDir()
 	repository := newMemoryRepository(root)
 	supervisor := &fakeSupervisor{}
-	controller := New(supervisor, repository, "heikou-test")
-	supervisor.start = func(request heikou.StartRequest) (heikou.Session, error) {
-		runtime := heikou.Session{ID: request.ID, Name: "h-" + request.ID, PaneID: "%1", Backend: request.Backend, Prompt: request.Prompt, Root: request.Root, Status: heikou.StatusLive, StartedAt: time.Now()}
+	controller := New(supervisor, repository, "shepherd-test")
+	supervisor.start = func(request shepherd.StartRequest) (shepherd.Session, error) {
+		runtime := shepherd.Session{ID: request.ID, Name: "shepherd-" + request.ID, PaneID: "%1", Backend: request.Backend, Prompt: request.Prompt, Root: request.Root, Status: shepherd.StatusLive, StartedAt: time.Now()}
 		supervisor.sessions = append(supervisor.sessions, runtime)
-		return heikou.Session{}, context.DeadlineExceeded
+		return shepherd.Session{}, context.DeadlineExceeded
 	}
-	session, err := controller.Start(context.Background(), StartRequest{Backend: heikou.BackendNoAgent, Prompt: "ambiguous", Root: root})
+	session, err := controller.Start(context.Background(), StartRequest{Backend: shepherd.BackendNoAgent, Prompt: "ambiguous", Root: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -798,9 +798,9 @@ func TestOrphanRequiresExplicitAdoptionBeforeMembership(t *testing.T) {
 	repository := newMemoryRepository(root)
 	id := "018f0000-0000-4000-8000-000000000041"
 	now := time.Now()
-	runtime := heikou.Session{ID: id, Name: "h-" + id, PaneID: "%1", Backend: heikou.BackendClaude, Prompt: "legacy task", Root: root, Status: heikou.StatusLive, StartedAt: now}
-	supervisor := &fakeSupervisor{sessions: []heikou.Session{runtime}}
-	controller := New(supervisor, repository, "heikou-test")
+	runtime := shepherd.Session{ID: id, Name: "shepherd-" + id, PaneID: "%1", Backend: shepherd.BackendClaude, Prompt: "legacy task", Root: root, Status: shepherd.StatusLive, StartedAt: now}
+	supervisor := &fakeSupervisor{sessions: []shepherd.Session{runtime}}
+	controller := New(supervisor, repository, "shepherd-test")
 	container, err := controller.CreateWorkstream(context.Background(), "Imported", "", []string{root})
 	if err != nil {
 		t.Fatal(err)

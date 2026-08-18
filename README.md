@@ -1,12 +1,12 @@
-# heikou
+# shepherd
 
-Heikou is a fast terminal dashboard for parallel native coding agents. It starts
+Shepherd is a fast terminal dashboard for parallel native coding agents. It starts
 real Codex and Claude Code sessions inside a private tmux server, organizes them
 into durable workstreams, lets you send follow-ups, and hands your terminal
 directly to the native agent UI when you attach.
 
 Tmux remains the runtime supervisor and the coding-agent CLIs remain the native
-runners. Heikou adds a small durable organization layer without introducing a
+runners. Shepherd adds a small durable organization layer without introducing a
 daemon, manager agent, task graph, or replacement execution engine.
 
 ## Nouns
@@ -25,66 +25,67 @@ daemon, manager agent, task graph, or replacement execution engine.
 - **Brief** — the one-line summary in the middle of a session row. Its lead is
   the session's title, initial task, or runner; the text after `↳` is what the
   runner last recorded the session doing, falling back to the latest message
-  sent through Heikou. A leading `~` marks text Heikou derived rather than
+  sent through Shepherd. A leading `~` marks text Shepherd derived rather than
   observed.
 - **Ungrouped** — durable sessions with no active workstream membership.
-- **Orphaned** — tmux panes carrying a Heikou ID unknown to durable state; they
+- **Orphaned** — tmux panes carrying a Shepherd ID unknown to durable state; they
   are never silently adopted.
 
 ## Install
 
-Heikou currently targets macOS. Requirements: Go 1.25+, tmux 3.3+, and at
+Shepherd currently targets macOS. Requirements: Go 1.25+, tmux 3.3+, and at
 least one of `codex` or `claude`. Runner commands can be configured when they
-are not on `PATH`; Heikou also discovers Codex inside the macOS ChatGPT app
+are not on `PATH`; Shepherd also discovers Codex inside the macOS ChatGPT app
 bundle.
 
 ```sh
-go install github.com/zamborg/heikou/cmd/h@latest
-h doctor
+go install github.com/ez-gz/shepherd/cmd/shepherd@latest
+shepherd doctor
 ```
 
 `@latest` resolves to the newest release tag, so this command never goes stale.
 Substitute an explicit tag when you need a particular release.
 
 Go does not run package-defined post-install hooks. After successful checks,
-`h doctor` prints the next step: `h quickstart`.
+`shepherd doctor` prints the next step: `shepherd quickstart`.
 
-Ensure `$(go env GOPATH)/bin` is on your `PATH`. To install the `heikou`, `h`,
-and `H` aliases together, build from source instead:
+Ensure `$(go env GOPATH)/bin` is on your `PATH`. To install `shepherd` together
+with the `s` and `S` aliases, build from source instead:
 
 ```sh
-git clone https://github.com/zamborg/heikou.git
-cd heikou
+git clone https://github.com/ez-gz/shepherd.git
+cd shepherd
 make install
 ```
 
-`make install` writes `heikou` to `~/.local/bin` and adds `h` / `H` symlinks.
+`make install` writes `shepherd` to `~/.local/bin` and adds `s` / `S` symlinks.
 Override the destination with `make install PREFIX=/somewhere`.
 
 For an agent-guided first run, run:
 
 ```sh
-h quickstart
+shepherd quickstart
 ```
 
-This embeds the [`learn-heikou` skill](skills/learn-heikou/SKILL.md) in the
+This embeds the [`learn-shepherd` skill](skills/learn-shepherd/SKILL.md) in the
 installed binary, prefers Claude when its configured executable is available,
-falls back to Codex, starts a real durable Heikou session, and attaches to it
+falls back to Codex, starts a real durable Shepherd session, and attaches to it
 immediately. Use
-`h quickstart -r codex` or `h quickstart -r claude` to choose explicitly.
+`shepherd quickstart -r codex` or `shepherd quickstart -r claude` to choose explicitly.
 
 The guide's first lesson is how to detach. Press `Ctrl-b`, release both keys,
-then press `d`; `h quickstart` will open the dashboard with the guide selected
+then press `d`; `shepherd quickstart` will open the dashboard with the guide selected
 so it can walk you through sending a follow-up, reattaching, workstreams,
 and persistent notes.
 
 ## Use it
 
-Run `h` (or `H`) from the directory that new agents should use as their root:
+Run `shepherd` (or its `s` / `S` aliases) from the directory that new agents
+should use as their root:
 
 ```sh
 cd ~/code/my-project
-h
+shepherd
 ```
 
 The composer is always ready, and it picks its destination *before* you type
@@ -118,19 +119,19 @@ key never depends on remembering which one you meant:
 | `Ctrl-G` | Enter resize mode; `Up` grows the lower pane, `Down` shows more sessions, `r` resets, and `Esc` exits |
 | `Enter` on a workstream | Collapse or expand its sessions |
 | `Enter` on a session | Attach its native terminal; inactive while replying, so it cannot attach to a row other than the pinned target |
-| `Ctrl-\` or `Ctrl-b d` while attached | Detach back to Heikou |
+| `Ctrl-\` or `Ctrl-b d` while attached | Detach back to Shepherd |
 | `Shift-drag` while attached | Select with the terminal rather than tmux, crossing panes and taking whole lines; iTerm2 uses `Option` for this |
 | `Ctrl-X` twice | Stop/remove a present runtime; once no pane remains, press twice again to delete its durable record |
 | `Esc` | Leave a reply and discard its draft, then clear the composer, then release a move mark, then select Ungrouped |
 | `Ctrl-C` | Quit the dashboard; `Esc` never quits |
 
 The terminal application decides whether macOS modifier chords reach a TUI.
-Heikou accepts enhanced Option/Command events plus common Alt, Home/End, and
+Shepherd accepts enhanced Option/Command events plus common Alt, Home/End, and
 Ctrl-key fallbacks. If a terminal reports `Shift-Enter` as ordinary Enter, use
 `Ctrl-J` for a newline.
 
 Inside an attached runner the same chords are tmux's business rather than
-Heikou's, and Heikou settles them for you: the private server encodes modified
+Shepherd's, and Shepherd settles them for you: the private server encodes modified
 keys for every pane instead of letting each runner negotiate. Claude Code asks
 for a scheme tmux implements and Codex asks for one it does not, and a pane that
 falls back to the legacy encoding receives `Shift-Enter` as a plain Enter — so
@@ -168,13 +169,13 @@ That second half is a real status line, not a restatement of what you typed:
 ● codex   9a8b7c  live   Rewrite the retry loop  ↳ also check the timeout
 ```
 
-Heikou reads it from the transcript Claude Code writes for the session it
+Shepherd reads it from the transcript Claude Code writes for the session it
 launched — the last tool call, or the first line of a finished reply. The `~` is
 not decoration: the phrase is derived from another program's records, so it is
-marked as something Heikou was told rather than saw. Codex writes an equivalent
-record but mints its own session id, so Heikou cannot tell which file belongs to
+marked as something Shepherd was told rather than saw. Codex writes an equivalent
+record but mints its own session id, so Shepherd cannot tell which file belongs to
 which session; those rows fall through to the latest message sent through
-Heikou, as before. Text entered directly in an attached native terminal is not
+Shepherd, as before. Text entered directly in an attached native terminal is not
 observable either way.
 
 Which sources fill a brief is a single ordered layout you can change in
@@ -193,46 +194,46 @@ and retains an interrupted pending launch when its original socket is unknown.
 The same primitives are available without the TUI:
 
 ```sh
-h spawn -r claude -C ~/code/project "Investigate the flaky test"
-h spawn -r codex -C ~/code/project -w "Core" "Implement the fix"
-h spawn -r no-agent -C ~/code/project "scratch shell"
-h list
-h send a1b2c3 "Also check whether the retry hides the root cause"
-h list --json
-h spawn --json -r codex -C ~/code/project "Machine-readable launch"
-h send --json a1b2c3 "Machine-readable delivery result"
-h attach a1b2c3
-h stop a1b2c3
+shepherd spawn -r claude -C ~/code/project "Investigate the flaky test"
+shepherd spawn -r codex -C ~/code/project -w "Core" "Implement the fix"
+shepherd spawn -r no-agent -C ~/code/project "scratch shell"
+shepherd list
+shepherd send a1b2c3 "Also check whether the retry hides the root cause"
+shepherd list --json
+shepherd spawn --json -r codex -C ~/code/project "Machine-readable launch"
+shepherd send --json a1b2c3 "Machine-readable delivery result"
+shepherd attach a1b2c3
+shepherd stop a1b2c3
 ```
 
 Every organizing action is also a command, so the whole durable model can be
 driven without the TUI:
 
 ```sh
-h ws create "API work" -C ~/code/api -d "the public API"
-h ws list --json
-h ws root add "API work" ~/code/api-client
-h ws rename "API work" "Public API"
-h ws reorder "Public API" --up
-h title a1b2c3 "OAuth retry investigation"
-h move a1b2c3 --workstream "Public API"
-h move a1b2c3 --ungrouped
-h adopt a1b2c3 -w "Public API"
-h peek a1b2c3
-h history a1b2c3 --last 10
-h conversation a1b2c3
-h resume a1b2c3 "Pick this back up and finish the retry work"
-h ws archive "Public API" --yes
-h delete a1b2c3 --yes
+shepherd ws create "API work" -C ~/code/api -d "the public API"
+shepherd ws list --json
+shepherd ws root add "API work" ~/code/api-client
+shepherd ws rename "API work" "Public API"
+shepherd ws reorder "Public API" --up
+shepherd title a1b2c3 "OAuth retry investigation"
+shepherd move a1b2c3 --workstream "Public API"
+shepherd move a1b2c3 --ungrouped
+shepherd adopt a1b2c3 -w "Public API"
+shepherd peek a1b2c3
+shepherd history a1b2c3 --last 10
+shepherd conversation a1b2c3
+shepherd resume a1b2c3 "Pick this back up and finish the retry work"
+shepherd ws archive "Public API" --yes
+shepherd delete a1b2c3 --yes
 ```
 
 Workstreams and sessions accept a full id, an id prefix, or a workstream name;
 an ambiguous prefix is an error rather than a guess. Flags may appear before or
-after positional arguments. `h ws archive` and `h delete` require an explicit
+after positional arguments. `shepherd ws archive` and `shepherd delete` require an explicit
 `--yes`.
 
-`h list --json` returns a machine-readable projection of workstreams and
-sessions, including durable/display titles, latest-via-Heikou text, runtime
+`shepherd list --json` returns a machine-readable projection of workstreams and
+sessions, including durable/display titles, latest-via-Shepherd text, runtime
 availability, a stable process-state enum, and an `exit_code` that is `null`
 when tmux cannot prove the outcome. Every command above accepts `--json` and
 returns a machine-readable result. These are local human CLI surfaces; they do
@@ -241,47 +242,47 @@ not enable manager authority.
 ## Resuming a conversation
 
 A tmux pane is mortal. The conversation inside it is not: both runners write it
-to disk and can continue it later by id. Heikou registers that id on the session
-automatically, so `h resume` picks the work back up instead of restarting it
+to disk and can continue it later by id. Shepherd registers that id on the session
+automatically, so `shepherd resume` picks the work back up instead of restarting it
 cold.
 
 ```sh
-h conversation a1b2c3    # the runner conversation id, and how Heikou knows it
-h resume a1b2c3 "Pick this back up and finish the retry work"
+shepherd conversation a1b2c3    # the runner conversation id, and how Shepherd knows it
+shepherd resume a1b2c3 "Pick this back up and finish the retry work"
 ```
 
 Resuming starts a *new* session that continues the old conversation. The
 original record is left exactly as it was, because it is the durable account of
 what already happened, including how it ended.
 
-How the id is known differs by runner, and Heikou reports which case it is
+How the id is known differs by runner, and Shepherd reports which case it is
 rather than presenting them as the same fact:
 
-| | id chosen at launch | resume by id | Heikou records it as |
+| | id chosen at launch | resume by id | Shepherd records it as |
 | --- | --- | --- | --- |
 | **Claude** | yes, `--session-id` | yes, `--resume` | `assigned` |
 | **Codex** | no such flag | yes, `codex resume` | `observed` |
 
-For Claude the id is a fact Heikou caused: Heikou already launched
+For Claude the id is a fact Shepherd caused: Shepherd already launched
 `claude --session-id <durable id>`, so the conversation id *is* the session id
 and nothing has to be looked up.
 
-Codex mints its own id and offers no way to set it, so Heikou learns it by
+Codex mints its own id and offers no way to set it, so Shepherd learns it by
 matching what Codex wrote. A rollout under `~/.codex/sessions` must agree on
 three things before it is accepted: the launch directory, a start time inside
 the match window, and the **verbatim initial prompt**. The prompt is what makes
 this evidence rather than a guess — running several agents in one repository at
-once is the point of Heikou, so directory and time alone routinely describe more
+once is the point of Shepherd, so directory and time alone routinely describe more
 than one session.
 
 Anything other than exactly one match is refused. If no rollout matches, or if
-two are genuinely indistinguishable, Heikou records nothing and says so:
+two are genuinely indistinguishable, Shepherd records nothing and says so:
 
 ```text
-$ h conversation a1b2c3
+$ shepherd conversation a1b2c3
 no conversation registered for a1b2c3 (codex): more than one codex rollout
 matches this session's launch directory, start time and initial prompt, so
-Heikou cannot tell which conversation is this one
+Shepherd cannot tell which conversation is this one
 ```
 
 That is a deliberate refusal, not a gap to be filled by picking the closest
@@ -291,29 +292,29 @@ confident as a right one.
 ## The pilot
 
 Because that command surface is complete, an ordinary agent can maintain
-Heikou's state. Heikou writes the instructions for one into `~/.heikou`:
+Shepherd's state. Shepherd writes the instructions for one into `~/.shepherd`:
 
 ```text
-~/.heikou/
+~/.shepherd/
   AGENTS.md                       operating contract, read by Codex and Claude
   CLAUDE.md                       pointer to AGENTS.md
-  skills/manage-heikou/SKILL.md   the full command reference
+  skills/manage-shepherd/SKILL.md   the full command reference
 ```
 
-A new installation is also seeded with one workstream named `heikou-managers`,
-rooted only at `~/.heikou`, so there is somewhere to launch pilots from the
+A new installation is also seeded with one workstream named `shepherd-managers`,
+rooted only at `~/.shepherd`, so there is somewhere to launch pilots from the
 dashboard without building it by hand.
 
 It is seeded only on an installation that has never written durable state, and
 the state file is what marks that: reads never create it and no-op mutations
 never write it. So deleting or archiving the workstream keeps it deleted, and an
-installation you have already organized is never seeded behind your back. `h init`
+installation you have already organized is never seeded behind your back. `shepherd init`
 is the explicit way to create it, or to get it back.
 
 Start a pilot by running an agent in that directory:
 
 ```sh
-cd ~/.heikou && claude
+cd ~/.shepherd && claude
 ```
 
 Codex works the same way. The instructions are deliberately vendor-neutral: the
@@ -325,7 +326,7 @@ move those three sessions into it", "register ~/code/api-client as a root",
 "what's running right now?" — instead of remembering which key does it.
 
 Those files are installed on first run and are **never overwritten**, so house
-rules you add to `AGENTS.md` survive upgrades. `h init --force` refreshes them
+rules you add to `AGENTS.md` survive upgrades. `shepherd init --force` refreshes them
 from a newer binary.
 
 The pilot is an ordinary agent with a shell, not a privileged one. It acts as
@@ -340,7 +341,7 @@ followed by two honest system groups:
 
 - **Ungrouped** contains durable sessions with no membership and preserves the
   original raw-session workflow.
-- **Orphaned tmux** contains panes carrying a Heikou ID that is unknown to the
+- **Orphaned tmux** contains panes carrying a Shepherd ID that is unknown to the
   durable store. They remain attachable and steerable but are never silently
   adopted into a workstream; `Ctrl-T` below makes adoption explicit.
 
@@ -370,7 +371,7 @@ key — or a paste — cancels. The question waits as long as you like, but the
 answer cannot arrive in the fraction of a second that means the key is being
 held down rather than pressed again. It is a bare control chord because those
 arrive as a single byte and need none of the enhanced key reporting that
-decides whether a modified arrow reaches Heikou at all. `Ctrl-A` was the obvious letter and is not
+decides whether a modified arrow reaches Shepherd at all. `Ctrl-A` was the obvious letter and is not
 available — the composer owns it as line start — and `v` is the only other
 letter of "archive" that no chord had already claimed.
 
@@ -391,8 +392,8 @@ so it reads when the selection lands somewhere new and costs nothing while the
 cursor sits still. Press `F3` after an agent or editor rewrites notes under a
 stationary cursor; moving off the row and back does the same thing.
 
-Roots are `Ctrl-O` on the dashboard and `h ws root add|set|rm` on the CLI;
-archiving is `Ctrl-V` on the dashboard and `h ws archive` on the CLI. Every
+Roots are `Ctrl-O` on the dashboard and `shepherd ws root add|set|rm` on the CLI;
+archiving is `Ctrl-V` on the dashboard and `shepherd ws archive` on the CLI. Every
 workstream keeps at least one root, root edits never rewrite historical session
 records or touch the filesystem, and archiving keeps all durable sessions,
 stops no runtime, and moves their memberships to Ungrouped.
@@ -402,36 +403,33 @@ contain sessions launched from several registered roots, but membership never
 implicitly adds a root.
 
 Workstream state is separate from settings. It remains a versioned, locked JSON
-sidecar at `~/.heikou/state.json`; ordinary workstream files live in
-`~/.heikou/workstreams/<id>/`. State updates are serialized with a
+sidecar at `~/.shepherd/state.json`; ordinary workstream files live in
+`~/.shepherd/workstreams/<id>/`. State updates are serialized with a
 local advisory lock so CLI commands and the dashboard cannot overwrite one
-another. V0.3.4 uses state schema v2 for durable titles. A valid v1 file is
-validated, migrated, and atomically rewritten as v2 without manufacturing a
-domain revision; future or invalid versions are rejected.
+another. State schema v3 stores durable titles and native conversation IDs. A
+valid v1 or v2 file is validated and atomically migrated without manufacturing
+a domain revision; future or invalid versions are rejected.
 
-## The Heikou directory
+## The Shepherd directory
 
-Everything Heikou owns lives in one place, `~/.heikou`:
+Everything Shepherd owns lives in one place, `~/.shepherd`:
 
 ```text
-~/.heikou/
+~/.shepherd/
   config.json          settings
   state.json           durable workstream/session state
   workstreams/<id>/    notes.md and artifacts
 ```
 
-Installations created before this layout used three separate XDG directories.
-The first run of a newer binary moves them into `~/.heikou` exactly once, prints
-what it moved, and repoints the absolute artifact directories recorded in state.
-It never runs when `HEIKOU_HOME` is set, never runs when `~/.heikou` already
-exists, and leaves any individually overridden path alone. If a move fails it
-stops and reports what already succeeded rather than running against a split
-installation.
+Shepherd does not inspect or modify Heikou's home directory. Users who want to
+carry selected durable records over can follow
+[`docs/transfer-sessions.md`](docs/transfer-sessions.md); fresh installations
+start here with no migration step.
 
 ## Configuration
 
 Press `Ctrl-S` (or `F2`) in the dashboard to open the settings pane. Press `e`
-there to create/open `~/.heikou/config.json` in `$VISUAL`, `$EDITOR`, or
+there to create/open `~/.shepherd/config.json` in `$VISUAL`, `$EDITOR`, or
 `vi`. Settings are deliberately one small JSON object:
 
 ```json
@@ -450,7 +448,7 @@ there to create/open `~/.heikou/config.json` in `$VISUAL`, `$EDITOR`, or
 ```
 
 Commands are argv arrays, not shell strings. Fixed flags are placed before the
-task arguments Heikou adds. Callers select a runner, while the controller's
+task arguments Shepherd adds. Callers select a runner, while the controller's
 trusted config-backed resolver loads and resolves its argv immediately before
 launch; a command action cannot supply arbitrary runner argv. The three
 `composer_keys` fields may be omitted to keep the defaults shown above.
@@ -460,13 +458,13 @@ once, so they may not share a key.
 `Enter` is the single commit key and is not configurable — that is what keeps
 the destination the one the composer displays.
 
-Every key Heikou already answers to is reserved and cannot be assigned to one
+Every key Shepherd already answers to is reserved and cannot be assigned to one
 of the three: the organize chords, `Ctrl-G` resize mode, the help and settings
 screens, and the composer's own editing keys such as `Shift-Enter`, `Ctrl-A`
 and `Option-Left`. A composer binding is consulted before any of them, so
 without the reservation the key would simply stop doing what it used to, with
 nothing said about it at any point. A settings file that names a reserved key
-fails to load with a message giving the key, what Heikou already does with it,
+fails to load with a message giving the key, what Shepherd already does with it,
 and the default that deleting the field restores.
 The removed `new_session` and `send_message` fields chose a commit key per
 destination. A config still carrying either one fails to load with a message
@@ -493,7 +491,7 @@ The built-in sources are:
 | --- | --- |
 | `title` | the durable title you gave the session |
 | `prompt` | the immutable task it was launched with |
-| `latest` | the most recent message sent through Heikou |
+| `latest` | the most recent message sent through Shepherd |
 | `activity` | what the runner last recorded the session doing |
 | `runner` | `claude session`, as a last resort |
 
@@ -504,7 +502,7 @@ to configure — and phrases the last record: `running make check`,
 `replied · make check is green`. It is derived from another program's file, so
 it always renders with the `~` mark, and it reads at most once every five
 seconds per session and only after that session has shown terminal activity.
-Naming it is what turns that on; drop it from the layout and Heikou reads
+Naming it is what turns that on; drop it from the layout and Shepherd reads
 nothing:
 
 ```json
@@ -517,7 +515,7 @@ nothing:
 ```
 
 Anything that is not built in must be defined under `brief.sources` as a command
-Heikou runs:
+Shepherd runs:
 
 ```json
 {
@@ -536,8 +534,8 @@ Heikou runs:
 ```
 
 The command is argv, not a shell string. It runs once per session, is told
-which session through `HEIKOU_SESSION_ID`, `HEIKOU_SESSION_RUNNER`,
-`HEIKOU_SESSION_STATE`, `HEIKOU_SESSION_ROOT`, and `HEIKOU_SESSION_TITLE`, and
+which session through `SHEPHERD_SESSION_ID`, `SHEPHERD_SESSION_RUNNER`,
+`SHEPHERD_SESSION_STATE`, `SHEPHERD_SESSION_ROOT`, and `SHEPHERD_SESSION_TITLE`, and
 prints one line to stdout. It is never given the session's prompt or messages.
 
 A session is only re-run after `interval_seconds` **and** only if it has shown
@@ -548,9 +546,9 @@ one line, and bounded. A source that fails or times out drops its text rather
 than leaving a stale line that looks current.
 
 Command output always renders with a leading `~`, and so does `activity`. A
-command may well be reporting the truth, but Heikou cannot check that; a phrase
+command may well be reporting the truth, but Shepherd cannot check that; a phrase
 read out of a transcript is a reading of another program's record rather than
-something Heikou watched happen. The mark is the difference between what it
+something Shepherd watched happen. The mark is the difference between what it
 observed and what it was told. Unknown source names,
 duplicate entries, an empty `lead`, a source nothing refers to, and a timeout
 longer than its interval are all load errors rather than surprises at runtime.
@@ -564,30 +562,30 @@ cheap transport test pane.
 
 | Environment variable | Default | Purpose |
 | --- | --- | --- |
-| `HEIKOU_DEFAULT_RUNNER` | `codex` | Initial runner in the composer |
-| `HEIKOU_TMUX_SOCKET` | `heikou` | Private tmux socket name |
-| `HEIKOU_HOME` | `~/.heikou` | Directory holding every Heikou file |
-| `HEIKOU_CONFIG` | `~/.heikou/config.json` | Settings file override |
-| `HEIKOU_STATE` | `~/.heikou/state.json` | Durable application-state override |
-| `HEIKOU_DATA` | `~/.heikou/workstreams` | Workstream artifact-directory base |
-| `HEIKOU_CODEX_BIN` | `codex` | Codex executable name or path |
-| `HEIKOU_CLAUDE_BIN` | `claude` | Claude executable name or path |
+| `SHEPHERD_DEFAULT_RUNNER` | `codex` | Initial runner in the composer |
+| `SHEPHERD_TMUX_SOCKET` | `shepherd` | Private tmux socket name |
+| `SHEPHERD_HOME` | `~/.shepherd` | Directory holding every Shepherd file |
+| `SHEPHERD_CONFIG` | `~/.shepherd/config.json` | Settings file override |
+| `SHEPHERD_STATE` | `~/.shepherd/state.json` | Durable application-state override |
+| `SHEPHERD_DATA` | `~/.shepherd/workstreams` | Workstream artifact-directory base |
+| `SHEPHERD_CODEX_BIN` | `codex` | Codex executable name or path |
+| `SHEPHERD_CLAUDE_BIN` | `claude` | Claude executable name or path |
 
 The dashboard also accepts `--runner`, `--root` / `-C`, and `--socket`.
 
-## What Heikou deliberately does not claim
+## What Shepherd deliberately does not claim
 
 An interactive agent process stays alive while it is thinking, waiting for
 input, or simply sitting at its prompt. Tmux cannot distinguish those semantic
-states. Heikou therefore reports process truth only: `live`, `attached`,
+states. Shepherd therefore reports process truth only: `live`, `attached`,
 `exited`, or `failed`, plus runtime, path, terminal activity, output preview,
 and an exit code when tmux supplies one. Some retained dead panes—especially on
-older tmux versions—omit `pane_dead_status`; Heikou reports their process as
+older tmux versions—omit `pane_dead_status`; Shepherd reports their process as
 exited with an unknown outcome and never guesses zero or persists a successful
 exit. It does not invent “completed” or “needs input” states, nor does it guess
 token usage.
 
-Workstreams are organization, not autonomy. Heikou has no manager role,
+Workstreams are organization, not autonomy. Shepherd has no manager role,
 coordination grants, approvals, parent-child sessions, task graph, automatic
 restart, queue, daemon, or MCP message bus. Durable session records survive a
 tmux-server loss, but a missing pane without an already recorded terminal
@@ -622,7 +620,7 @@ vendored dependencies are committed; users compile from source at `go install`,
 and the agent instruction files reach the binary through `//go:embed` at compile
 time. Editing `SKILL.md` or a help string is the whole change.
 
-**Releasing is bumping `version` in [`cmd/h/main.go`](cmd/h/main.go).** `@latest`
+**Releasing is bumping `version` in [`cmd/shepherd/main.go`](cmd/shepherd/main.go).** `@latest`
 resolves to the newest tag rather than to `main`, so a change merged without a
 bump reaches nobody while nothing looks wrong. When CI passes on a `main` commit
 whose `version` has no tag, the `Tag` workflow creates and pushes it; when the
@@ -636,15 +634,15 @@ prompt/message content. Controller tests cover durable-before-launch ordering,
 failed launch retention, conservative reconciliation, orphan detection, and
 explicit stop outcomes.
 
-The end-to-end suite builds `h` and drives it as a subprocess against a
-throwaway `HEIKOU_HOME` and a private tmux socket, so argument parsing, refusal
+The end-to-end suite builds `shepherd` and drives it as a subprocess against a
+throwaway `SHEPHERD_HOME` and a private tmux socket, so argument parsing, refusal
 text, `--json` shape, and exit codes are tested as they ship. Alongside it, the
 in-process suite drives the same verbs directly against a stub controller, which
 is where the twenty-odd refusals and every `--json` key are checked without a
 tmux server anywhere in sight.
 
 The tmux-dependent suites skip themselves without tmux. Set
-`HEIKOU_TEST_REQUIRE_TMUX=1` — as CI and `make race` do — to turn that skip into
+`SHEPHERD_TEST_REQUIRE_TMUX=1` — as CI and `make race` do — to turn that skip into
 a failure, so a run cannot report green over a suite that never executed.
 
 `internal/architecture` holds the module's shape: which package may import

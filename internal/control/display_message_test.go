@@ -3,13 +3,13 @@ package control
 import (
 	"testing"
 
-	"github.com/zamborg/heikou/internal/heikou"
-	"github.com/zamborg/heikou/internal/workstream"
+	"github.com/ez-gz/shepherd/internal/shepherd"
+	"github.com/ez-gz/shepherd/internal/workstream"
 )
 
 func TestProjectOneUsesLatestRuntimeUserMessageForDisplay(t *testing.T) {
 	record := workstream.SessionRecord{ID: "018f0000-0000-4000-8000-000000000070", InitialPrompt: "initial task"}
-	runtime := heikou.Session{LastUserMessage: "latest follow-up"}
+	runtime := shepherd.Session{LastUserMessage: "latest follow-up"}
 
 	session := projectOne(workstream.EmptyState(), record, &runtime)
 	if got := session.DisplayMessage(); got != "latest follow-up" {

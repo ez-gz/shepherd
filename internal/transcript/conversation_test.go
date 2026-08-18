@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zamborg/heikou/internal/heikou"
+	"github.com/ez-gz/shepherd/internal/shepherd"
 )
 
 var launchedAt = time.Date(2026, 8, 13, 14, 40, 25, 0, time.UTC)
@@ -82,7 +82,7 @@ func encode(t *testing.T, value map[string]any) string {
 
 func find(sessions, root, prompt string, at time.Time) (Conversation, error) {
 	return Reader{CodexSessions: sessions}.FindConversation(ConversationRequest{
-		Runner: heikou.BackendCodex, Root: root, StartedAt: at, Prompt: prompt,
+		Runner: shepherd.BackendCodex, Root: root, StartedAt: at, Prompt: prompt,
 	})
 }
 
@@ -101,7 +101,7 @@ func TestCodexConversationIsFoundFromLaunchDirectoryTimeAndPrompt(t *testing.T) 
 }
 
 // This is the case the whole prompt-matching design exists for. Running several
-// agents in one repository at once is what Heikou is for, so two rollouts
+// agents in one repository at once is what Shepherd is for, so two rollouts
 // minutes apart in the same directory is the normal case, not the exotic one.
 func TestConcurrentSessionsInOneDirectoryAreToldApartByTheirPrompt(t *testing.T) {
 	sessions := rollout(t, "", "aaaaaaaa-0000-7000-8000-000000000001", "/work/repo", launchedAt.Add(3*time.Second), "fix the parser")
@@ -116,7 +116,7 @@ func TestConcurrentSessionsInOneDirectoryAreToldApartByTheirPrompt(t *testing.T)
 	}
 }
 
-// Two launches that agree on everything Heikou can check are genuinely
+// Two launches that agree on everything Shepherd can check are genuinely
 // indistinguishable. Choosing the nearer one would resume the wrong work while
 // reporting the same confidence as a real match.
 func TestIdenticalLaunchesRefuseRatherThanChoose(t *testing.T) {
@@ -180,11 +180,11 @@ func TestAbsentSessionsDirectoryIsNotFoundRatherThanAnError(t *testing.T) {
 	}
 }
 
-// Claude accepts --session-id, so its conversation is whatever Heikou chose.
+// Claude accepts --session-id, so its conversation is whatever Shepherd chose.
 // Looking it up on disk would replace a certainty with an inference, and the
 // only way to keep that from happening quietly is to refuse the question.
 func TestRunnersThatNameTheirOwnConversationAreRefused(t *testing.T) {
-	for _, backend := range []heikou.Backend{heikou.BackendClaude, heikou.BackendNoAgent} {
+	for _, backend := range []shepherd.Backend{shepherd.BackendClaude, shepherd.BackendNoAgent} {
 		t.Run(string(backend), func(t *testing.T) {
 			_, err := Reader{CodexSessions: t.TempDir()}.FindConversation(ConversationRequest{
 				Runner: backend, Root: "/work/repo", StartedAt: launchedAt, Prompt: "hello",
@@ -201,9 +201,9 @@ func TestIncompleteConversationRequestsAreRejected(t *testing.T) {
 		name    string
 		request ConversationRequest
 	}{
-		{name: "no root", request: ConversationRequest{Runner: heikou.BackendCodex, StartedAt: launchedAt, Prompt: "x"}},
-		{name: "no start", request: ConversationRequest{Runner: heikou.BackendCodex, Root: "/work", Prompt: "x"}},
-		{name: "no prompt", request: ConversationRequest{Runner: heikou.BackendCodex, Root: "/work", StartedAt: launchedAt}},
+		{name: "no root", request: ConversationRequest{Runner: shepherd.BackendCodex, StartedAt: launchedAt, Prompt: "x"}},
+		{name: "no start", request: ConversationRequest{Runner: shepherd.BackendCodex, Root: "/work", Prompt: "x"}},
+		{name: "no prompt", request: ConversationRequest{Runner: shepherd.BackendCodex, Root: "/work", StartedAt: launchedAt}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

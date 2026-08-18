@@ -5,7 +5,7 @@ name: Tag
 # repository looks wrong in the meantime — the code is on main, the install
 # command still works, and it still installs the previous release.
 #
-# This closes that gap. Bumping `version` in cmd/h/main.go is the whole release
+# This closes that gap. Bumping `version` in cmd/shepherd/main.go is the whole release
 # ritual; merging it is what ships.
 #
 # It runs after CI rather than on the push, so a commit is only ever tagged once
@@ -49,14 +49,14 @@ jobs:
         id: decide
         run: |
           set -eu
-          version="$(sed -n 's/^var version = "\([^"]*\)"$/\1/p' cmd/h/main.go)"
+          version="$(sed -n 's/^var version = "\([^"]*\)"$/\1/p' cmd/shepherd/main.go)"
           tag="v${version}"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
             echo "release=false" >> "$GITHUB_OUTPUT"
             ahead="$(git rev-list --count "${tag}..HEAD")"
             if [ "$ahead" -gt 0 ]; then
-              echo "::notice::main is ${ahead} commit(s) ahead of ${tag}. Those changes do not reach anyone until \`version\` in cmd/h/main.go is bumped; go install …@latest still installs ${tag}."
+              echo "::notice::main is ${ahead} commit(s) ahead of ${tag}. Those changes do not reach anyone until \`version\` in cmd/shepherd/main.go is bumped; go install …@latest still installs ${tag}."
             fi
           else
             echo "release=true" >> "$GITHUB_OUTPUT"
@@ -76,6 +76,6 @@ jobs:
           set -eu
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "${TAG}" -m "heikou ${TAG}"
+          git tag -a "${TAG}" -m "shepherd ${TAG}"
           git push origin "${TAG}"
-          echo "::notice::Tagged ${TAG}. go install github.com/zamborg/heikou/cmd/h@latest now installs it."
+          echo "::notice::Tagged ${TAG}. go install github.com/ez-gz/shepherd/cmd/shepherd@latest now installs it."

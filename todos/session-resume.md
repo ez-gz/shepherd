@@ -1,13 +1,13 @@
 # Session resume
 
 Status: shipped. Sessions register their native runner conversation
-automatically, and `h resume` continues it in a new session.
+automatically, and `shepherd resume` continues it in a new session.
 
 ## The problem
 
-A Heikou session outlives its tmux pane, but until now the *conversation* did
+A Shepherd session outlives its tmux pane, but until now the *conversation* did
 not. When the pane died, the Claude or Codex conversation was still on disk and
-still resumable by its own CLI — and unreachable from Heikou, which had never
+still resumable by its own CLI — and unreachable from Shepherd, which had never
 written the id down. The work could only be restarted cold.
 
 ## What the runners actually offer
@@ -39,19 +39,19 @@ State schema **v3** adds `SessionRecord.Conversation`: the id, a `source` of
 `assigned` or `observed`, and when it was recorded. The v2-to-v3 migration is
 schema-only and back-fills nothing, deliberately — see `docs/DESIGN.md`.
 
-- **Claude** registers at launch, with no filesystem access at all: Heikou
+- **Claude** registers at launch, with no filesystem access at all: Shepherd
   already passes `--session-id <durable id>`, so the conversation id *is* the
   session id. `assigned`.
 - **Codex** registers on first use, by matching a rollout on launch directory,
   a start time inside the match window, and the **verbatim initial prompt**.
   Exactly one match or nothing. `observed`.
-- `h conversation ID` reports the id and its source. `h resume ID MESSAGE`
+- `shepherd conversation ID` reports the id and its source. `shepherd resume ID MESSAGE`
   starts a new session continuing that conversation; the original record is
   untouched.
 
 The registration is also what anything **reading** a runner's files has to ask
 for. A resumed session's records are filed under the conversation it continued,
-never under its own durable id, so `h history` and the brief's activity line
+never under its own durable id, so `shepherd history` and the brief's activity line
 both locate a transcript through `control.Session.ConversationID`. Shipping the
 registration and the activity line in the same release without that lookup is
 how 0.7.2 left every resumed session permanently blank; see
@@ -68,9 +68,9 @@ Codex registration can fail, and does so loudly rather than approximately:
 - **no match** — the session never started, the rollout was deleted, or Codex
   has not written it yet;
 - **ambiguous** — two launches agree on directory, window and prompt. Genuinely
-  indistinguishable, so Heikou refuses.
+  indistinguishable, so Shepherd refuses.
 
-Both leave the record unregistered and both exit zero from `h conversation`,
+Both leave the record unregistered and both exit zero from `shepherd conversation`,
 which is a state of the world rather than a fault. Nothing is ever recorded on a
 partial match, and the nearest candidate is never chosen.
 
@@ -83,7 +83,7 @@ directory and prompt are — and a cold start on a loaded machine is slow.
   cannot tell a session that ran from one whose launch failed before Claude
   wrote anything, so it would register conversations that never existed.
 - **No scan for Claude.** The resolver refuses runners that name their own
-  conversation. Consulting the filesystem for something Heikou chose turns a
+  conversation. Consulting the filesystem for something Shepherd chose turns a
   certainty into an inference for no benefit.
 - **No launch-time scan for Codex.** Codex has barely started when tmux returns,
   so a scan there would mostly find nothing and would either race or block the
@@ -97,7 +97,7 @@ directory and prompt are — and a cold start on a loaded machine is slow.
 
 ## Next
 
-- `h history` for Codex. The identification half is now done — see
+- `shepherd history` for Codex. The identification half is now done — see
   [session-history.md](session-history.md) — and only the rollout parser is
   left.
 - A dashboard affordance for resume. The durable registration is the load-

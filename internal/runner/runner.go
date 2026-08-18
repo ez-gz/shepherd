@@ -11,8 +11,8 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/zamborg/heikou/internal/env"
-	"github.com/zamborg/heikou/internal/heikou"
+	"github.com/ez-gz/shepherd/internal/env"
+	"github.com/ez-gz/shepherd/internal/shepherd"
 )
 
 // Launch is everything an adapter needs to build a runner's argv. It is a
@@ -22,12 +22,12 @@ import (
 type Launch struct {
 	Prompt string
 	Title  string
-	// SessionID is Heikou's durable id for the session being started. Claude
+	// SessionID is Shepherd's durable id for the session being started. Claude
 	// accepts it as its own conversation id, which is what makes a fresh Claude
 	// session's conversation known without asking anyone.
 	SessionID string
 	// Resume names a native conversation to continue instead of beginning one.
-	// Empty starts fresh. When it is set the runner, not Heikou, owns the
+	// Empty starts fresh. When it is set the runner, not Shepherd, owns the
 	// resulting conversation id — it is the id being resumed.
 	Resume string
 }
@@ -36,7 +36,7 @@ type Launch struct {
 func (l Launch) Resuming() bool { return strings.TrimSpace(l.Resume) != "" }
 
 type Adapter interface {
-	Backend() heikou.Backend
+	Backend() shepherd.Backend
 	Binary() string
 	Arguments(Launch) []string
 	// SupportsResume reports whether this runner can continue a conversation by
@@ -47,14 +47,14 @@ type Adapter interface {
 
 type codexAdapter struct{}
 
-func (codexAdapter) Backend() heikou.Backend { return heikou.BackendCodex }
+func (codexAdapter) Backend() shepherd.Backend { return shepherd.BackendCodex }
 func (codexAdapter) Binary() string {
 	return env.ValueOr(env.CodexBinary, "codex")
 }
 func (codexAdapter) SupportsResume() bool { return true }
 
 // Arguments builds Codex argv. Codex has no flag for choosing a session id at
-// launch, so a fresh session carries no identity Heikou chose; `codex resume`
+// launch, so a fresh session carries no identity Shepherd chose; `codex resume`
 // takes the id Codex minted as a positional argument.
 func (codexAdapter) Arguments(launch Launch) []string {
 	if launch.Resuming() {
@@ -65,7 +65,7 @@ func (codexAdapter) Arguments(launch Launch) []string {
 
 type claudeAdapter struct{}
 
-func (claudeAdapter) Backend() heikou.Backend { return heikou.BackendClaude }
+func (claudeAdapter) Backend() shepherd.Backend { return shepherd.BackendClaude }
 func (claudeAdapter) Binary() string {
 	return env.ValueOr(env.ClaudeBinary, "claude")
 }
@@ -82,11 +82,11 @@ func (claudeAdapter) Arguments(launch Launch) []string {
 	return []string{"--session-id", launch.SessionID, "--name", launch.Title, "--", launch.Prompt}
 }
 
-func AdapterFor(backend heikou.Backend) (Adapter, error) {
+func AdapterFor(backend shepherd.Backend) (Adapter, error) {
 	switch backend {
-	case heikou.BackendCodex:
+	case shepherd.BackendCodex:
 		return codexAdapter{}, nil
-	case heikou.BackendClaude:
+	case shepherd.BackendClaude:
 		return claudeAdapter{}, nil
 	default:
 		return nil, fmt.Errorf("unsupported runner %q", backend)
@@ -98,7 +98,7 @@ func AdapterFor(backend heikou.Backend) (Adapter, error) {
 // private tmux server has an older PATH. The macOS application candidates
 // cover Codex installations bundled with the desktop app but not linked into
 // the user's login-shell PATH.
-func ResolveCommand(backend heikou.Backend, configured []string) ([]string, error) {
+func ResolveCommand(backend shepherd.Backend, configured []string) ([]string, error) {
 	adapter, err := AdapterFor(backend)
 	if err != nil {
 		return nil, err
@@ -111,7 +111,7 @@ func ResolveCommand(backend heikou.Backend, configured []string) ([]string, erro
 		return nil, fmt.Errorf("find %s runner: command executable is empty", backend)
 	}
 	path, err := exec.LookPath(command[0])
-	if err != nil && command[0] == "codex" && backend == heikou.BackendCodex {
+	if err != nil && command[0] == "codex" && backend == shepherd.BackendCodex {
 		path, err = firstExecutable(codexAppCandidates())
 	}
 	if err != nil {
@@ -160,7 +160,7 @@ func firstExecutable(candidates []string) (string, error) {
 // tmux. Prompt, title and resume target are encoded only to keep tmux argv
 // metadata compact; no value is ever evaluated by a shell.
 func ExecEncoded(backendValue, encodedPrompt, encodedTitle, encodedCommand, encodedResume string) error {
-	backend, err := heikou.ParseBackend(backendValue)
+	backend, err := shepherd.ParseBackend(backendValue)
 	if err != nil {
 		return err
 	}

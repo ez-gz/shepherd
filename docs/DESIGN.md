@@ -1,11 +1,11 @@
-# Heikou design
+# Shepherd design
 
 ## Product thesis
 
 The fastest useful parallel-agent system is not a new agent runtime. It is a
 high-quality control surface over the native runners people already trust.
 
-Heikou V0 therefore optimizes one loop:
+Shepherd V0 therefore optimizes one loop:
 
 1. See every coding-agent session in one scan-friendly view.
 2. Dispatch a new task without leaving the composer.
@@ -35,7 +35,7 @@ panel or experimental agent teams. Its strongest choices are:
 - background work that survives leaving the dashboard.
 
 Anthropic's implementation has a per-user supervisor and structured semantic
-state, so Heikou cannot honestly reproduce all its statuses from tmux alone. The
+state, so Shepherd cannot honestly reproduce all its statuses from tmux alone. The
 V0 copies the interaction loop rather than pretending to copy the substrate.
 Anthropic's [launch post](https://claude.com/blog/agent-view-in-claude-code) is
 also useful visual evidence: compact rows, restrained status color, and almost
@@ -50,7 +50,7 @@ watch, continue, kill—and a clean runner-adapter idea.
 
 Its execution substrate is intentionally not reused. It launches headless
 one-shot processes, redirects JSONL, and reconstructs follow-up context. That
-makes raw native attachment and steering a running turn impossible. Heikou
+makes raw native attachment and steering a running turn impossible. Shepherd
 inverts the design: the PTY-backed native session is truth, and structured logs
 can become an optional observer later.
 
@@ -74,13 +74,13 @@ runtime boundary below is intentionally independent of Bubble Tea.
 ```mermaid
 flowchart LR
     UI["Bubble Tea dashboard"] --> C["typed command/query controller"]
-    CLI["h CLI + JSON projection"] --> C
+    CLI["shepherd CLI + JSON projection"] --> C
     CFG["one JSON settings module"] --> UI
     CFG --> R["trusted runner argv resolver"]
     C --> R
     C --> DS["versioned atomic state"]
     C --> S["Supervisor interface"]
-    S --> T["private tmux server (-L heikou)"]
+    S --> T["private tmux server (-L shepherd)"]
     T --> P1["one session + pane"]
     T --> P2["one session + pane"]
     P1 --> CX["native codex"]
@@ -94,15 +94,14 @@ flowchart LR
 
 The package boundaries are:
 
-- `internal/heikou`: runner-neutral session types and the `Supervisor`
+- `internal/shepherd`: runner-neutral session types and the `Supervisor`
   contract;
-- `internal/env`: every environment variable name Heikou reads or sets, so that
+- `internal/env`: every environment variable name Shepherd reads or sets, so that
   one list answers which variables it honours;
 - `internal/format`: the presentation helpers every surface shares — elapsed
   time, abbreviated ids, shortened paths, and text made safe to print on one
   line;
-- `internal/home`: the one directory holding every Heikou file, and the
-  one-time migration from the earlier XDG layout;
+- `internal/home`: the one directory holding every Shepherd file;
 - `internal/config`: the single JSON settings model and strict loader;
 - `internal/brief`: the session-row summary, its ordered source layout, and the
   observer that reads transcripts and runs configured command sources off the
@@ -118,14 +117,14 @@ The package boundaries are:
   as the one thing the session was last doing;
 - `internal/ui`: typed screen reducers, their shared overview read model, and
   rendering; and
-- `cmd/h`: human-facing CLI commands and dependency diagnostics.
+- `cmd/shepherd`: human-facing CLI commands and dependency diagnostics.
 
-`internal/env`, `internal/format` and `internal/heikou` are leaves: they import
+`internal/env`, `internal/format` and `internal/shepherd` are leaves: they import
 nothing else in the module, so any layer may use them and none can create a
 cycle. That ordering is not a convention to remember — `internal/architecture`
 declares it and fails the build when a new import contradicts it.
 
-There is no Heikou daemon in V0. The private tmux server already provides the
+There is no Shepherd daemon in V0. The private tmux server already provides the
 needed process lifetime and PTY ownership. It is isolated from the user's normal
 tmux server and configured with zero-session persistence.
 
@@ -152,9 +151,9 @@ substituting an arbitrary executable through the command payload.
 
 ### Runner transcripts
 
-`h peek` returns the pane's current frame and cannot return more. A full-screen
+`shepherd peek` returns the pane's current frame and cannot return more. A full-screen
 runner draws on the terminal's alternate screen, which keeps no scrollback, so
-whatever scrolled past was never retained by anything Heikou can ask. Measured
+whatever scrolled past was never retained by anything Shepherd can ask. Measured
 against a live `claude` pane, `capture-pane -p -J -S -120` returned 85 lines, 60
 of them shell output produced before the runner started. No capture depth
 recovers the rest.
@@ -162,7 +161,7 @@ recovers the rest.
 So history does not come from tmux; it comes from the runner.
 `internal/transcript` reads the JSONL file Claude Code writes per session and
 projects it into turns: who said what, and which tools ran. It is the first
-authoritative structured runner signal Heikou has, and it stays an observer —
+authoritative structured runner signal Shepherd has, and it stays an observer —
 read-only, bounded, and never copied into durable state.
 
 Three properties keep it honest:
@@ -173,19 +172,19 @@ Three properties keep it honest:
   list.
 - **It fails soft.** The file layout belongs to Claude, so a missing transcript
   is a normal answer and never an error. The verb exits zero.
-- **It refuses to guess.** Heikou owns the Claude session id because it launches
+- **It refuses to guess.** Shepherd owns the Claude session id because it launches
   `claude --session-id <id>`, so the file name is exact. Codex mints its own id,
   and matching a rollout by launch directory and start time would be a guess
   that silently attributes one session's history to another — so Codex reports
   `unsupported` rather than a likely-looking file.
 
-Transcript reading never merges with `h peek`, and neither one is evidence that
+Transcript reading never merges with `shepherd peek`, and neither one is evidence that
 a session is healthy, finished, or idle. The runtime state enum remains the only
-claim Heikou makes about now.
+claim Shepherd makes about now.
 
 ## Session lifecycle
 
-Before the first child starts, Heikou bootstraps the private server with:
+Before the first child starts, Shepherd bootstraps the private server with:
 
 - `exit-empty off`, so the supervisor can exist with zero sessions;
 - global `remain-on-exit on`, so even an immediately failing runner leaves an
@@ -194,7 +193,7 @@ Before the first child starts, Heikou bootstraps the private server with:
 - a large history buffer and `window-size latest`; and
 - `Ctrl-\` as a root-table detach binding, in addition to normal `Ctrl-b d`.
 
-The bootstrap marker is versioned so a later Heikou release can safely migrate
+The bootstrap marker is versioned so a later Shepherd release can safely migrate
 an already-running server's configuration. Environment variable *names* are
 refreshed into tmux on each invocation; values are never embedded in a shell
 command. Provider executables are resolved through that trusted configuration
@@ -208,7 +207,7 @@ identity and never generates one. Metadata is encoded in tmux user options:
 
 | Field | Purpose |
 | --- | --- |
-| stable UUID | Heikou identity; also supplied to Claude as its session ID |
+| stable UUID | Shepherd identity; also supplied to Claude as its session ID |
 | pane ID | immutable target for capture and input |
 | runner | `codex`, `claude`, or `no-agent` |
 | root | launch directory |
@@ -218,12 +217,12 @@ identity and never generates one. Metadata is encoded in tmux user options:
 The ID is present in the tmux session name, environment, session metadata, and a
 pane-scoped canonical marker in the same tmux command queue that creates the
 session. Reconciliation therefore never depends on a successful later metadata
-write. The tmux child directly invokes a small hidden Heikou exec mode with
+write. The tmux child directly invokes a small hidden Shepherd exec mode with
 argv—not a shell string. That process decodes metadata and replaces itself with
 the native runner using `exec`. Prompts beginning with `-`, quotes, backticks,
 and shell syntax remain literal.
 
-`no-agent` deliberately takes a smaller path: Heikou omits the child command
+`no-agent` deliberately takes a smaller path: Shepherd omits the child command
 from `tmux new-session`, so tmux starts its default interactive shell. The
 composer text is retained only as the session label and is never injected into
 that shell. Follow-up transport remains available, making this a cheap way to
@@ -232,7 +231,7 @@ agent request.
 
 ### Settings
 
-V0 has one settings file, normally `~/.heikou/config.json`. It contains a
+V0 has one settings file, normally `~/.shepherd/config.json`. It contains a
 default runner, argv arrays for Codex and Claude, and three composer bindings:
 `reply`, `cycle_runner`, and `cycle_root`. Arrays preserve the exact
 executable/flag boundary and avoid shell parsing. `reply` acts only on an empty
@@ -265,21 +264,21 @@ daemon-owned settings in this iteration.
 ### Durable workstreams
 
 Workstream state is application data, not configuration. It normally lives at
-`~/.heikou/state.json`, independently of `internal/config`, with ordinary
-artifacts at `~/.heikou/workstreams/<id>/`. The JSON
+`~/.shepherd/state.json`, independently of `internal/config`, with ordinary
+artifacts at `~/.shepherd/workstreams/<id>/`. The JSON
 sidecar remains versioned, mode `0600`, written by temp-file/fsync/rename, and
 guarded by an advisory lock. Storage remains behind a repository interface so a
 later SQLite implementation does not change the domain contract.
 
 That directory is also where the **pilot** lives. Every organizing action the
 controller exposes now has a CLI verb, so an ordinary agent running in
-`~/.heikou` can maintain Heikou's durable state through the same typed command
+`~/.shepherd` can maintain Shepherd's durable state through the same typed command
 plane the dashboard uses. Its instructions are embedded in the binary and
 installed as `AGENTS.md`, a `CLAUDE.md` pointer, and
-`skills/manage-heikou/SKILL.md`; existing files are never overwritten, so user
-edits survive an upgrade and `h init --force` is the explicit refresh.
+`skills/manage-shepherd/SKILL.md`; existing files are never overwritten, so user
+edits survive an upgrade and `shepherd init --force` is the explicit refresh.
 
-A new installation is seeded with a `heikou-managers` workstream rooted only at
+A new installation is seeded with a `shepherd-managers` workstream rooted only at
 the home directory, so a pilot can be launched from the dashboard without
 hand-built setup. The signal is `FileStore.Exists`: reads never create the state
 file and no-op mutations never write it, so its absence means nothing has ever
@@ -287,9 +286,9 @@ been recorded here. Keying off the workstream's own presence would have
 resurrected one the user deleted on purpose, and a separate provisioning marker
 would have been a second source of truth for a question the state file already
 answers. An installation that already has state is never seeded implicitly;
-`h init` is the explicit opt-in and the way back after a deletion.
+`shepherd init` is the explicit opt-in and the way back after a deletion.
 
-A pilot receives no authority. It shells out to `h` and is therefore the local
+A pilot receives no authority. It shells out to `shepherd` and is therefore the local
 human at that boundary, holding no grant and leaving `localHumanAuthorizer`
 unchanged. Adding one does not enable session actors, and an authorizer rule
 would be theater: a process with a shell can call any verb regardless of the
@@ -301,17 +300,10 @@ sandbox, and the distinction is deliberate.
 `internal/workstream` resolve their paths through it, so the directory is
 described in one place rather than derived independently three times. Keeping
 settings, state, and artifacts in a single directory is also what makes the
-directory a coherent working root for an agent that maintains Heikou's own
+directory a coherent working root for an agent that maintains Shepherd's own
 state: it can see its instructions, its notes, and its artifacts without being
 handed three unrelated paths.
 
-Relocation from the earlier three-directory XDG layout is an explicit one-time
-migration at the process entry point, not a permanent dual-read fallback. It is
-suppressed by `HEIKOU_HOME`, by an existing home directory, and per-path by any
-individual override. Because `Workstream.ArtifactDir` is persisted absolute,
-moving artifacts also repoints those recorded directories; that rewrite
-deliberately leaves each workstream's revision and timestamps untouched, because
-relocating files is not a domain edit.
 State schema v2 adds the optional durable session title, and v3 the optional
 native runner conversation. The loader applies explicit ordered migrations, one
 adjacent version at a time: it strictly validates the claimed older shape,
@@ -352,16 +344,16 @@ adapter, not of the model — a resumed session continues the conversation of th
 session before it while owning a new durable id — and encoding it as sameness
 would make the resume path unrepresentable.
 
-The field records **how Heikou came to know the id**, because the two runners do
-not offer the same thing and reporting them identically would be a claim Heikou
+The field records **how Shepherd came to know the id**, because the two runners do
+not offer the same thing and reporting them identically would be a claim Shepherd
 cannot support:
 
-- `assigned` — Heikou chose the id and passed it as argv. A fresh Claude session
+- `assigned` — Shepherd chose the id and passed it as argv. A fresh Claude session
   is launched as `claude --session-id <durable id>`, and any resume passes the
   id being continued. The runner had no say, so the id is certain and no
   filesystem is consulted. Looking one up anyway would downgrade a certainty
   into an inference, so the resolver refuses to answer for these runners at all.
-- `observed` — the runner minted its own id and Heikou matched a runner-written
+- `observed` — the runner minted its own id and Shepherd matched a runner-written
   record back to the launch afterwards. This is Codex, which has no flag for
   choosing a session id; `codex --session-id` is rejected by its argument parser
   outright, and there is no environment variable for it either.
@@ -373,7 +365,7 @@ A Codex match requires three things to agree — launch directory, a start time
 inside the match window, and the verbatim initial prompt — and anything other
 than exactly one match is refused rather than resolved. The prompt is what makes
 this evidence rather than correlation: running several agents in one repository
-at once is what Heikou is *for*, so directory and time alone routinely describe
+at once is what Shepherd is *for*, so directory and time alone routinely describe
 more than one session. Two genuinely indistinguishable launches produce a
 refusal, because picking the nearest would resume the wrong work while looking
 exactly as confident as a real match.
@@ -384,7 +376,7 @@ later gets the same answer as asking at launch would have. Scanning during
 `Start` would mostly find nothing — Codex has barely begun when tmux returns —
 and would either race or block the launch path.
 
-Resolution is reached through a `ConversationResolver` seam wired in `cmd/h`,
+Resolution is reached through a `ConversationResolver` seam wired in `cmd/shepherd`,
 the same shape as the trusted argv `CommandResolver`. `internal/control` keeps
 the policy — what may be recorded, and with what provenance — while reading
 another program's files stays outside it. The typed action carries no id and no
@@ -435,7 +427,7 @@ positive evidence that the process ended, but not evidence of success: the
 runtime exit code remains unknown and reconciliation never substitutes zero or
 persists `OutcomeExited`.
 
-Absence never implies exit, and Heikou never automatically restarts an
+Absence never implies exit, and Shepherd never automatically restarts an
 unavailable session. A positive matching pane can repair an ambiguous launch
 result after a timeout; this is reconciliation, not automatic restart.
 Legacy panes can enter the durable model only through an explicit adoption
@@ -457,7 +449,7 @@ created.
 
 ### Follow-up messages
 
-Messages never enter a shell command constructed by Heikou. It:
+Messages never enter a shell command constructed by Shepherd. It:
 
 1. writes the exact UTF-8 bytes to a uniquely named tmux buffer on stdin;
 2. uses bracketed `paste-buffer -p` into the canonical pane, retaining tmux's
@@ -474,14 +466,14 @@ interactive shell, so that shell interprets follow-up text after delivery.
 ### Attachment
 
 Bubble Tea suspends its renderer and restores the host terminal before running
-`tmux -L heikou attach-session`. `TMUX` and `TMUX_PANE` are removed from the
-child environment, so this works when Heikou itself is launched inside another
+`tmux -L shepherd attach-session`. `TMUX` and `TMUX_PANE` are removed from the
+child environment, so this works when Shepherd itself is launched inside another
 tmux server. Detaching returns control to the same dashboard process and forces
 a fresh session/preview read.
 
 ### Keyboard protocol
 
-Heikou execs the runner binary directly and adds no keyboard shim, but tmux sits
+Shepherd execs the runner binary directly and adds no keyboard shim, but tmux sits
 between the runner and the terminal, and what a runner can negotiate through it
 is not what it could negotiate alone. Codex asks for the kitty keyboard
 protocol, which tmux does not implement; Claude Code asks for xterm
@@ -639,7 +631,7 @@ transport remains capable of arbitrary UTF-8.
 
 Rows stay intentionally sparse: process mark, runner, short ID, truthful state,
 the **brief**, optional root basename, and runtime. The recent message preview
-is bounded tmux metadata for the lifetime of the retained runtime; Heikou does
+is bounded tmux metadata for the lifetime of the retained runtime; Shepherd does
 not claim to see text entered directly in an attached native TUI. Detailed
 title, initial task, path, activity, and the exact terminal tail sit below the
 list.
@@ -654,13 +646,13 @@ differently.
 It has two slots. The lead is always rendered; the detail sits behind a `↳` and
 yields first when the row is narrow. Each slot is an ordered list of **sources**
 and takes the first with something to say — today title, initial task, then
-runner for the lead, and runner activity, latest-via-Heikou, then initial task
+runner for the lead, and runner activity, latest-via-Shepherd, then initial task
 for the detail. A source already spent on the lead is skipped in the detail,
 which is the whole of the rule that used to be written out as "show the initial
 task as detail, but only when a title exists".
 
 The sources divide into two kinds, and the division is what the package is
-shaped around. Four of them restate something Heikou already holds: a title, a
+shaped around. Four of them restate something Shepherd already holds: a title, a
 prompt, a message it sent, a runner's name. One of them, **activity**, goes and
 looks: it reads the tail of the transcript the runner is already writing and
 reports the last record — a tool call, or the first line of a finished reply.
@@ -674,7 +666,7 @@ Two properties are load-bearing:
 - **Separate budgets.** The slots are truncated independently. Sharing one
   budget meant a long lead could reduce the detail to a fragment, and that what
   a row would actually show could not be predicted from its width. It also meant
-  rows paid twenty columns for the `latest via Heikou` label before a single
+  rows paid twenty columns for the `latest via Shepherd` label before a single
   character of message, so at common terminal widths a row named the field and
   then had no room to show it. Rows now use the sigil; the details pane, which
   has a whole line, still names the source, and derives that label from whichever
@@ -683,7 +675,7 @@ Two properties are load-bearing:
   from durable state or a tmux observation. Anything else renders with a leading
   `~`, and that is now the ordinary case rather than a reserved one: the
   activity source is a phrase assembled from a file another program wrote, so it
-  is something Heikou was told rather than something it watched. The mark exists
+  is something Shepherd was told rather than something it watched. The mark exists
   because such text lands in the same columns as a title the user typed, which
   is the same claim-more-than-you-know failure that reporting an unprovable exit
   code as zero would be.
@@ -747,17 +739,17 @@ spends a page-cache read of the last 128 KiB of a file the runner is writing
 anyway. A record longer than that window fills it, and the reader then reports
 nothing rather than reaching further back for something that is no longer true.
 
-Commands are told which session through `HEIKOU_SESSION_*` variables and are
+Commands are told which session through `SHEPHERD_SESSION_*` variables and are
 never given the prompt or messages. Wanting a status line in a row is not a
 reason to hand what someone typed to another program on a timer, and the same
 rule keeps prompts out of the planned diagnostic log.
 
-Heikou is the contract layer here, not the implementation. It defines what a
+Shepherd is the contract layer here, not the implementation. It defines what a
 source is asked, what it may return, how often it runs, and how its answer is
 marked; what a source does to produce that line is the user's business. A brief
 written by a model therefore needs no code in this repository — it is a program
-that reads `HEIKOU_SESSION_*` and prints a line. Building one in would have
-added the first network call and the first API-key handling anywhere in Heikou,
+that reads `SHEPHERD_SESSION_*` and prints a line. Building one in would have
+added the first network call and the first API-key handling anywhere in Shepherd,
 and a second way to do what the generic source already does.
 
 Dashboard navigation uses one typed primary-screen state plus a typed help
@@ -769,13 +761,13 @@ text input while adding nothing to the read model, it was folded into the
 dashboard rather than kept in sync with it.
 
 The CLI exposes the same read/action surface for local automation without
-claiming manager authority. `h list --json` returns workstreams and sessions,
-including titles, latest-via-Heikou text, availability, a stable process-state
-enum, and a nullable exit code; `h spawn --json` and `h send --json` return
+claiming manager authority. `shepherd list --json` returns workstreams and sessions,
+including titles, latest-via-Shepherd text, availability, a stable process-state
+enum, and a nullable exit code; `shepherd spawn --json` and `shepherd send --json` return
 machine-readable action results.
 
 `F1`, or `?` when the composer is empty, opens a scrollable, viewport-safe help
-panel. It describes Heikou, reports the active composer bindings, and defines
+panel. It describes Shepherd, reports the active composer bindings, and defines
 the core nouns: workstream, session, runtime, root, runner, composer,
 Ungrouped, and Orphaned.
 
@@ -865,18 +857,18 @@ authentication and can consume paid model usage.
 
 ### The end-to-end layer
 
-`cmd/h/e2e_test.go` builds the binary and drives it as a subprocess, against a
-throwaway `HEIKOU_HOME`, a redirected `HOME`, and a private tmux socket.
+`cmd/shepherd/e2e_test.go` builds the binary and drives it as a subprocess, against a
+throwaway `SHEPHERD_HOME`, a redirected `HOME`, and a private tmux socket.
 
 That shape is deliberate. The things it protects — dispatch, flag parsing, the
 exact wording of a refusal, the shape of `--json`, the exit code — are the
 contract two audiences depend on, a person at a shell and the pilot agent. It
-found a shipped bug on its first run: `h spawn "task" -r claude` silently
+found a shipped bug on its first run: `shepherd spawn "task" -r claude` silently
 launched the default runner, because Go's `flag` package stops parsing at the
 first positional and only the newer verbs went through `parseAnywhere`.
 
 The cost is that `go test -cover` reports nothing for this layer, since coverage
-instrumentation does not follow a subprocess. `cmd/h`'s coverage number
+instrumentation does not follow a subprocess. `cmd/shepherd`'s coverage number
 therefore measures the in-process layer alone; do not read it as the state of
 CLI testing.
 
@@ -884,14 +876,14 @@ CLI testing.
 
 Handlers take an `app` struct carrying two writers, a dialer for
 `control.Service`, the settings loader, and the working directory. Everything a
-verb touches outside itself arrives through it, so `cmd/h/cli_test.go` can drive
+verb touches outside itself arrives through it, so `cmd/shepherd/cli_test.go` can drive
 any verb with a `controltest.Stub` and no tmux server at all.
 
 The rule that layer exists to hold is that **a verb which refuses its arguments
 must never have dialled**. A bad argument is not a reason to need tmux, and
 without the rule "you forgot `--yes`" arrives as "tmux is required" on a machine
 where the server is wedged. It is asserted for every refusal, and it found the
-one place it was false: an unknown `h ws root` action passed the argument-count
+one place it was false: an unknown `shepherd ws root` action passed the argument-count
 check whenever it arrived with two arguments.
 
 `internal/control/controltest` holds the only double for `control.Service`.
@@ -911,12 +903,12 @@ purpose.
 
 Two narrower rules ride along, each written after the thing it prevents had
 already happened: the shared presentation helpers may be declared only in
-`internal/format`, and a `HEIKOU_` variable name may be written only in
+`internal/format`, and a `SHEPHERD_` variable name may be written only in
 `internal/env`.
 
 ### The published-contract layer
 
-`cmd/h/contract_test.go` asserts that the JSON keys `skills/manage-heikou`
+`cmd/shepherd/contract_test.go` asserts that the JSON keys `skills/manage-shepherd`
 promises the pilot are keys the CLI actually emits, and that every session state
 the CLI can report is one the instructions document. A renamed field would
 otherwise break the pilot in the worst way available: it stops finding the data
@@ -925,6 +917,6 @@ and starts guessing, with nothing failing anywhere.
 ### Refusing to skip
 
 The tmux-dependent suites skip themselves when tmux is absent, which is right
-for a developer and wrong for CI. `HEIKOU_TEST_REQUIRE_TMUX=1` converts the skip
+for a developer and wrong for CI. `SHEPHERD_TEST_REQUIRE_TMUX=1` converts the skip
 into a failure. CI sets it globally, so a runner that loses its tmux install
 reports red rather than a green run over tests that never executed.

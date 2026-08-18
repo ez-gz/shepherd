@@ -17,8 +17,8 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/zamborg/heikou/internal/control"
-	"github.com/zamborg/heikou/internal/workstream"
+	"github.com/ez-gz/shepherd/internal/control"
+	"github.com/ez-gz/shepherd/internal/workstream"
 )
 
 // Stub implements control.Service. A zero Stub answers every call with zero

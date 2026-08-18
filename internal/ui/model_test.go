@@ -12,12 +12,12 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/zamborg/heikou/internal/config"
-	"github.com/zamborg/heikou/internal/control"
-	"github.com/zamborg/heikou/internal/control/controltest"
-	"github.com/zamborg/heikou/internal/format"
-	"github.com/zamborg/heikou/internal/heikou"
-	"github.com/zamborg/heikou/internal/workstream"
+	"github.com/ez-gz/shepherd/internal/config"
+	"github.com/ez-gz/shepherd/internal/control"
+	"github.com/ez-gz/shepherd/internal/control/controltest"
+	"github.com/ez-gz/shepherd/internal/format"
+	"github.com/ez-gz/shepherd/internal/shepherd"
+	"github.com/ez-gz/shepherd/internal/workstream"
 )
 
 // fakeController records the calls these tests assert on and inherits the rest
@@ -123,11 +123,11 @@ func (f *fakeController) RemoveRoot(_ context.Context, workstreamID, root string
 func TestViewStaysWithinTerminalAtCommonSizes(t *testing.T) {
 	now := time.Now()
 	container := testWorkstream("018f0000-0000-4000-8000-000000000001", "Unicode project", []string{"/tmp/a directory with spaces/日本語-project"}, now)
-	session := testDurableSession("018f0000-0000-4000-8000-000000000002", container.ID, heikou.BackendClaude, "Implement 日本語 support with 👩🏽‍💻 emoji and e\u0301 combining characters in a deliberately very long task title", container.Roots[0], now)
+	session := testDurableSession("018f0000-0000-4000-8000-000000000002", container.ID, shepherd.BackendClaude, "Implement 日本語 support with 👩🏽‍💻 emoji and e\u0301 combining characters in a deliberately very long task title", container.Roots[0], now)
 	for _, size := range []struct{ width, height int }{{40, 15}, {80, 24}, {120, 40}} {
-		model, _ := newTestModel("/tmp/a directory with spaces", heikou.BackendCodex)
+		model, _ := newTestModel("/tmp/a directory with spaces", shepherd.BackendCodex)
 		model.width, model.height = size.width, size.height
-		model.setSnapshot(control.Snapshot{Workstreams: []workstream.Workstream{container}, Sessions: []control.Session{session}, StatePath: "/tmp/heikou-state.json"})
+		model.setSnapshot(control.Snapshot{Workstreams: []workstream.Workstream{container}, Sessions: []control.Session{session}, StatePath: "/tmp/shepherd-state.json"})
 		model.selected = sessionRowKey(session)
 		model.restoreSelection()
 		model.previewID = session.ID
@@ -138,16 +138,16 @@ func TestViewStaysWithinTerminalAtCommonSizes(t *testing.T) {
 
 func TestDashboardClipsAtTinyTerminalHeights(t *testing.T) {
 	for height := 1; height <= 7; height++ {
-		model, _ := newTestModel("/tmp", heikou.BackendCodex)
+		model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 		model.width, model.height = 40, height
 		assertViewFits(t, model.View().Content, model.width, model.height)
 	}
 }
 
 func TestNewWithSelectedSessionRestoresGuideAfterInitialSnapshot(t *testing.T) {
-	session := testDurableSession("018f0000-0000-4000-8000-000000000041", "", heikou.BackendClaude, "guided tour", "/tmp", time.Now())
-	controller := &fakeController{snapshot: control.Snapshot{Sessions: []control.Session{session}, StatePath: "/tmp/heikou-test-state.json"}}
-	model := NewWithSelectedSession(controller, "/tmp", heikou.BackendClaude, config.Store{}, config.Default(), session.ID)
+	session := testDurableSession("018f0000-0000-4000-8000-000000000041", "", shepherd.BackendClaude, "guided tour", "/tmp", time.Now())
+	controller := &fakeController{snapshot: control.Snapshot{Sessions: []control.Session{session}, StatePath: "/tmp/shepherd-test-state.json"}}
+	model := NewWithSelectedSession(controller, "/tmp", shepherd.BackendClaude, config.Store{}, config.Default(), session.ID)
 	model.setSnapshot(controller.snapshot)
 	model.restoreSelection()
 	selected, ok := model.selectedSession()
@@ -157,9 +157,9 @@ func TestNewWithSelectedSessionRestoresGuideAfterInitialSnapshot(t *testing.T) {
 }
 
 func TestSessionRowKeepsRuntimeVisibleAtEightyColumns(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.width = 80
-	session := testDurableSession("018f0000-0000-4000-8000-000000000003", "", heikou.BackendCodex, "a task long enough to compete with the runtime column for space", "/tmp", time.Now())
+	session := testDurableSession("018f0000-0000-4000-8000-000000000003", "", shepherd.BackendCodex, "a task long enough to compete with the runtime column for space", "/tmp", time.Now())
 	session.Runtime.StartedAt = time.Now().Add(-2 * time.Minute)
 	row := model.renderSessionRow(session, false)
 	if !strings.Contains(ansi.Strip(row), "2m") {
@@ -171,8 +171,8 @@ func TestSessionRowKeepsRuntimeVisibleAtEightyColumns(t *testing.T) {
 }
 
 func TestNarrowSessionRowsPreserveStatusAndTitleBeforeMetadata(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
-	session := testDurableSession("018f0000-0000-4000-8000-000000000003", "", heikou.BackendCodex, "initial task", "/tmp", time.Now())
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
+	session := testDurableSession("018f0000-0000-4000-8000-000000000003", "", shepherd.BackendCodex, "initial task", "/tmp", time.Now())
 	session.Record.Title = "Release Linux build"
 
 	model.width = 40
@@ -190,9 +190,9 @@ func TestNarrowSessionRowsPreserveStatusAndTitleBeforeMetadata(t *testing.T) {
 }
 
 func TestMediumSessionRowsRestoreRunnerWithoutCrowdingOutTitle(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.width = sessionRowRunnerMinWidth
-	session := testDurableSession("018f0000-0000-4000-8000-000000000003", "", heikou.BackendCodex, "initial task", "/tmp", time.Now())
+	session := testDurableSession("018f0000-0000-4000-8000-000000000003", "", shepherd.BackendCodex, "initial task", "/tmp", time.Now())
 	session.Record.Title = "Release Linux build"
 
 	row := model.renderSessionRow(session, false)
@@ -212,8 +212,8 @@ func TestMediumSessionRowsRestoreRunnerWithoutCrowdingOutTitle(t *testing.T) {
 // medium cases above never reach because both run below sessionRowRichMinWidth.
 // The move mark widens the row prefix, so it is exercised in both states.
 func TestWideRowsStayInsideThePane(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
-	session := testDurableSession("018f0000-0000-4000-8000-000000000005", "", heikou.BackendNoAgent, "initial task", "/tmp", time.Now())
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
+	session := testDurableSession("018f0000-0000-4000-8000-000000000005", "", shepherd.BackendNoAgent, "initial task", "/tmp", time.Now())
 	session.Record.Title = strings.Repeat("a very long title ", 12)
 
 	for _, width := range []int{40, sessionRowRunnerMinWidth, sessionRowRichMinWidth, 80, 120} {
@@ -235,9 +235,9 @@ func TestWideRowsStayInsideThePane(t *testing.T) {
 }
 
 func TestMarkedSessionStaysIdentifiableAfterTheCursorLeaves(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.width = 100
-	session := testDurableSession("018f0000-0000-4000-8000-000000000006", "", heikou.BackendCodex, "marked work", "/tmp", time.Now())
+	session := testDurableSession("018f0000-0000-4000-8000-000000000006", "", shepherd.BackendCodex, "marked work", "/tmp", time.Now())
 
 	unmarked := ansi.Strip(model.renderSessionRow(session, false))
 	model.markedSession = session.ID
@@ -252,9 +252,9 @@ func TestMarkedSessionStaysIdentifiableAfterTheCursorLeaves(t *testing.T) {
 }
 
 func TestSelectedRowHasExplicitMarkerAndContinuousWidth(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.width = 80
-	session := testDurableSession("018f0000-0000-4000-8000-000000000004", "", heikou.BackendNoAgent, "scratch shell", "/tmp", time.Now())
+	session := testDurableSession("018f0000-0000-4000-8000-000000000004", "", shepherd.BackendNoAgent, "scratch shell", "/tmp", time.Now())
 	selected := model.renderSessionRow(session, true)
 	unselected := model.renderSessionRow(session, false)
 	if !strings.HasPrefix(ansi.Strip(selected), "›") {
@@ -268,10 +268,10 @@ func TestSelectedRowHasExplicitMarkerAndContinuousWidth(t *testing.T) {
 	}
 }
 
-func TestSessionViewsRenderTitleBeforeLatestMessageSentThroughHeikou(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+func TestSessionViewsRenderTitleBeforeLatestMessageSentThroughShepherd(t *testing.T) {
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.width, model.height = 160, 30
-	session := testDurableSession("018f0000-0000-4000-8000-000000000005", "", heikou.BackendCodex, "initial task", "/tmp", time.Now())
+	session := testDurableSession("018f0000-0000-4000-8000-000000000005", "", shepherd.BackendCodex, "initial task", "/tmp", time.Now())
 	session.Record.Title = "release linux build"
 	session.LastUserMessage = "most recent follow-up"
 	model.snapshot.Sessions = []control.Session{session}
@@ -286,11 +286,11 @@ func TestSessionViewsRenderTitleBeforeLatestMessageSentThroughHeikou(t *testing.
 	if title, latest := strings.Index(row, "release linux build"), strings.Index(row, "↳ most recent follow-up"); title < 0 || latest <= title {
 		t.Fatalf("dashboard row did not render title before latest detail: %q", row)
 	}
-	if strings.Contains(row, "latest via Heikou") {
+	if strings.Contains(row, "latest via Shepherd") {
 		t.Fatalf("dashboard row spent columns on the field label: %q", row)
 	}
 	details := ansi.Strip(model.renderDetails())
-	if !strings.Contains(details, "title release linux build") || !strings.Contains(details, "latest via Heikou · most recent follow-up") ||
+	if !strings.Contains(details, "title release linux build") || !strings.Contains(details, "latest via Shepherd · most recent follow-up") ||
 		!strings.Contains(details, "initial task · initial task") {
 		t.Fatalf("details did not show title and latest user message: %q", details)
 	}
@@ -309,9 +309,9 @@ func TestStatusLabelDistinguishesUnknownExitFromKnownSuccess(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			runtime := heikou.Session{Status: heikou.StatusExited, ExitCode: test.code}
+			runtime := shepherd.Session{Status: shepherd.StatusExited, ExitCode: test.code}
 			if test.code != nil && *test.code != 0 {
-				runtime.Status = heikou.StatusFailed
+				runtime.Status = shepherd.StatusFailed
 			}
 			session := control.Session{Status: control.StatusExited, Runtime: &runtime}
 			_, got := statusLabel(session)
@@ -323,11 +323,11 @@ func TestStatusLabelDistinguishesUnknownExitFromKnownSuccess(t *testing.T) {
 }
 
 func TestRowsGroupDurableSessionsAndKeepOrphansSeparate(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	now := time.Now()
 	container := testWorkstream("018f0000-0000-4000-8000-000000000010", "Core", []string{"/tmp"}, now)
-	member := testDurableSession("018f0000-0000-4000-8000-000000000011", container.ID, heikou.BackendCodex, "member", "/tmp", now)
-	ungrouped := testDurableSession("018f0000-0000-4000-8000-000000000012", "", heikou.BackendClaude, "inbox", "/tmp", now)
+	member := testDurableSession("018f0000-0000-4000-8000-000000000011", container.ID, shepherd.BackendCodex, "member", "/tmp", now)
+	ungrouped := testDurableSession("018f0000-0000-4000-8000-000000000012", "", shepherd.BackendClaude, "inbox", "/tmp", now)
 	orphan := testOrphan("018f0000-0000-4000-8000-000000000013", "/tmp", now)
 	model.setSnapshot(control.Snapshot{Workstreams: []workstream.Workstream{container}, Sessions: []control.Session{member, ungrouped}, Orphans: []control.Session{orphan}})
 	rows := model.rows()
@@ -349,7 +349,7 @@ func TestRowsGroupDurableSessionsAndKeepOrphansSeparate(t *testing.T) {
 }
 
 func TestInitialSelectionRemainsUngroupedForBackwardCompatibleLaunches(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.snapshot.Workstreams = []workstream.Workstream{testWorkstream("018f0000-0000-4000-8000-000000000014", "Core", []string{"/tmp/core"}, time.Now())}
 	model.setSnapshot(model.snapshot)
 	model.restoreSelection()
@@ -359,7 +359,7 @@ func TestInitialSelectionRemainsUngroupedForBackwardCompatibleLaunches(t *testin
 }
 
 func TestSelectedWorkstreamAndRootDriveLaunch(t *testing.T) {
-	model, controller := newTestModel("/tmp/dashboard", heikou.BackendCodex)
+	model, controller := newTestModel("/tmp/dashboard", shepherd.BackendCodex)
 	model.width, model.height = 100, 30
 	now := time.Now()
 	container := testWorkstream("018f0000-0000-4000-8000-000000000020", "Multi repo", []string{"/tmp/api", "/tmp/web"}, now)
@@ -388,7 +388,7 @@ func TestSelectedWorkstreamAndRootDriveLaunch(t *testing.T) {
 }
 
 func TestEmptyEnterOnHeaderCollapsesInsteadOfAttaching(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	container := testWorkstream("018f0000-0000-4000-8000-000000000030", "Core", []string{"/tmp"}, time.Now())
 	model.snapshot.Workstreams = []workstream.Workstream{container}
 	model.setSnapshot(model.snapshot)
@@ -402,8 +402,8 @@ func TestEmptyEnterOnHeaderCollapsesInsteadOfAttaching(t *testing.T) {
 }
 
 func TestEmptyTabCyclesThroughNoAgent(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
-	for _, want := range []heikou.Backend{heikou.BackendClaude, heikou.BackendNoAgent, heikou.BackendCodex} {
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
+	for _, want := range []shepherd.Backend{shepherd.BackendClaude, shepherd.BackendNoAgent, shepherd.BackendCodex} {
 		updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab}))
 		model = updated.(Model)
 		if model.backend != want {
@@ -413,7 +413,7 @@ func TestEmptyTabCyclesThroughNoAgent(t *testing.T) {
 }
 
 func TestSettingsShortcutDoesNotStealPrintableS(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 's', Text: "s"}))
 	model = updated.(Model)
 	if model.screen == screenSettings || model.inputValue() != "s" {
@@ -433,7 +433,7 @@ func TestSettingsShortcutDoesNotStealPrintableS(t *testing.T) {
 // Organize verbs are chords precisely so that every printable key stays the
 // composer's. A bare n or r has to reach the draft untouched.
 func TestOrganizeChordsDoNotStealPrintableInput(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	for _, key := range []tea.Key{
 		{Code: 'n', Text: "n"},
 		{Code: 'r', Text: "r"},
@@ -453,7 +453,7 @@ func TestOrganizeChordsDoNotStealPrintableInput(t *testing.T) {
 }
 
 func TestCtrlNNamesANewWorkstreamThroughTheComposer(t *testing.T) {
-	model, controller := newTestModel("/tmp", heikou.BackendCodex)
+	model, controller := newTestModel("/tmp", shepherd.BackendCodex)
 	model.width, model.height = 120, 30
 
 	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'n', Mod: tea.ModCtrl}))
@@ -496,7 +496,7 @@ func TestCtrlNNamesANewWorkstreamThroughTheComposer(t *testing.T) {
 // are cached until the selection moves, so this is the only way to pick up an
 // external write under a stationary cursor.
 func TestF3ForcesARefreshWithoutChangingScreen(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	updated, cmd := model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyF3}))
 	model = updated.(Model)
 	if model.screen != screenDashboard {
@@ -511,7 +511,7 @@ func TestF3ForcesARefreshWithoutChangingScreen(t *testing.T) {
 }
 
 func TestTypedScreenAndHelpOverlayReturnToUnderlyingScreen(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 
 	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 's', Mod: tea.ModCtrl}))
 	model = updated.(Model)
@@ -542,10 +542,10 @@ func TestTypedScreenAndHelpOverlayReturnToUnderlyingScreen(t *testing.T) {
 // Ctrl-R carries the verb and the cursor supplies the noun: the same chord
 // renames a workstream or retitles a session depending on the selected row.
 func TestCtrlRRenamesWhicheverNounIsSelected(t *testing.T) {
-	model, controller := newTestModel("/tmp", heikou.BackendCodex)
+	model, controller := newTestModel("/tmp", shepherd.BackendCodex)
 	now := time.Now()
 	container := testWorkstream("018f0000-0000-4000-8000-000000000020", "Core", []string{"/tmp"}, now)
-	session := testDurableSession("018f0000-0000-4000-8000-000000000021", container.ID, heikou.BackendCodex, "initial task", "/tmp", now)
+	session := testDurableSession("018f0000-0000-4000-8000-000000000021", container.ID, shepherd.BackendCodex, "initial task", "/tmp", now)
 	session.Record.Title = "Old title"
 	model.setSnapshot(control.Snapshot{Workstreams: []workstream.Workstream{container}, Sessions: []control.Session{session}})
 	model.selected = sessionRowKey(session)
@@ -615,7 +615,7 @@ func TestCtrlRRenamesWhicheverNounIsSelected(t *testing.T) {
 // A rename is a destination, so Esc cancels it in one press rather than
 // clearing the draft first and leaving the composer pointed somewhere odd.
 func TestEscapeCancelsAnOrganizeEditInOnePress(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	now := time.Now()
 	container := testWorkstream("018f0000-0000-4000-8000-000000000022", "Core", []string{"/tmp"}, now)
 	model.setSnapshot(control.Snapshot{Workstreams: []workstream.Workstream{container}})
@@ -636,17 +636,17 @@ func TestEscapeCancelsAnOrganizeEditInOnePress(t *testing.T) {
 // cursor crosses the list one group at a time, in the order the list draws its
 // groups, and stops rather than wrapping at either end.
 func TestOptionArrowsJumpBetweenWorkstreams(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	now := time.Now()
 	first := testWorkstream("018f0000-0000-4000-8000-000000000071", "First", []string{"/tmp"}, now)
 	second := testWorkstream("018f0000-0000-4000-8000-000000000072", "Second", []string{"/tmp"}, now)
-	inner := testDurableSession("018f0000-0000-4000-8000-000000000073", first.ID, heikou.BackendCodex, "one", "/tmp", now)
-	last := testDurableSession("018f0000-0000-4000-8000-000000000074", first.ID, heikou.BackendCodex, "two", "/tmp", now)
+	inner := testDurableSession("018f0000-0000-4000-8000-000000000073", first.ID, shepherd.BackendCodex, "one", "/tmp", now)
+	last := testDurableSession("018f0000-0000-4000-8000-000000000074", first.ID, shepherd.BackendCodex, "two", "/tmp", now)
 	model.snapshot.Workstreams = []workstream.Workstream{first, second}
 	model.snapshot.Sessions = []control.Session{
 		inner, last,
-		testDurableSession("018f0000-0000-4000-8000-000000000075", second.ID, heikou.BackendCodex, "three", "/tmp", now),
-		testDurableSession("018f0000-0000-4000-8000-000000000076", "", heikou.BackendCodex, "four", "/tmp", now),
+		testDurableSession("018f0000-0000-4000-8000-000000000075", second.ID, shepherd.BackendCodex, "three", "/tmp", now),
+		testDurableSession("018f0000-0000-4000-8000-000000000076", "", shepherd.BackendCodex, "four", "/tmp", now),
 	}
 	model.snapshot.Orphans = []control.Session{testOrphan("018f0000-0000-4000-8000-000000000077", "/tmp", now)}
 	model.setSnapshot(model.snapshot)
@@ -704,7 +704,7 @@ func TestOptionArrowsJumpBetweenWorkstreams(t *testing.T) {
 }
 
 func TestShiftArrowsReorderOnlyNamedWorkstreams(t *testing.T) {
-	model, controller := newTestModel("/tmp", heikou.BackendCodex)
+	model, controller := newTestModel("/tmp", shepherd.BackendCodex)
 	now := time.Now()
 	first := testWorkstream("018f0000-0000-4000-8000-000000000061", "First", []string{"/tmp"}, now)
 	second := testWorkstream("018f0000-0000-4000-8000-000000000062", "Second", []string{"/tmp"}, now)
@@ -780,11 +780,11 @@ func TestShiftArrowsReorderOnlyNamedWorkstreams(t *testing.T) {
 // Ungrouped pinned last, because sessions have no order inside a workstream to
 // change. See todos/session-ordering.md.
 func TestShiftArrowsMoveASessionBetweenAdjacentWorkstreams(t *testing.T) {
-	model, controller := newTestModel("/tmp", heikou.BackendCodex)
+	model, controller := newTestModel("/tmp", shepherd.BackendCodex)
 	now := time.Now()
 	first := testWorkstream("018f0000-0000-4000-8000-000000000064", "First", []string{"/tmp"}, now)
 	second := testWorkstream("018f0000-0000-4000-8000-000000000065", "Second", []string{"/tmp"}, now)
-	session := testDurableSession("018f0000-0000-4000-8000-000000000066", first.ID, heikou.BackendCodex, "task", "/tmp", now)
+	session := testDurableSession("018f0000-0000-4000-8000-000000000066", first.ID, shepherd.BackendCodex, "task", "/tmp", now)
 	model.setSnapshot(control.Snapshot{
 		Workstreams: []workstream.Workstream{first, second},
 		Sessions:    []control.Session{session},
@@ -838,7 +838,7 @@ func TestShiftArrowsMoveASessionBetweenAdjacentWorkstreams(t *testing.T) {
 }
 
 func TestResizeModeAdjustsTheDashboardSplit(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.width, model.height = 100, 30
 	container := testWorkstream("018f0000-0000-4000-8000-000000000063", "Core", []string{"/tmp"}, time.Now())
 	model.snapshot.Workstreams = []workstream.Workstream{container}
@@ -875,7 +875,7 @@ func TestResizeModeAdjustsTheDashboardSplit(t *testing.T) {
 
 func TestResizeModeClampsSafelyAcrossTerminalAndComposerSizes(t *testing.T) {
 	for _, size := range []struct{ width, height int }{{20, 8}, {80, 24}, {120, 50}} {
-		model, _ := newTestModel("/tmp", heikou.BackendCodex)
+		model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 		model.width, model.height = size.width, size.height
 		model.resizeMode = true
 		for range 100 {
@@ -896,7 +896,7 @@ func TestResizeModeClampsSafelyAcrossTerminalAndComposerSizes(t *testing.T) {
 }
 
 func TestResizeUsesVisibleHeightAfterTerminalShrinks(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.width, model.height = 100, 50
 	for range 100 {
 		model.resizeLowerPane(1)
@@ -910,7 +910,7 @@ func TestResizeUsesVisibleHeightAfterTerminalShrinks(t *testing.T) {
 }
 
 func TestResizeUsesVisibleHeightAfterComposerExpands(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.width, model.height = 100, 30
 	for range 100 {
 		model.resizeLowerPane(1)
@@ -924,7 +924,7 @@ func TestResizeUsesVisibleHeightAfterComposerExpands(t *testing.T) {
 }
 
 func TestNonLayoutKeyLeavesResizeModeAndKeepsItsMeaning(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.resizeMode = true
 	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'x', Text: "x"}))
 	model = updated.(Model)
@@ -944,11 +944,11 @@ func TestNonLayoutKeyLeavesResizeModeAndKeepsItsMeaning(t *testing.T) {
 // Ctrl-T carries both halves of a move: it marks on a session row and completes
 // on a workstream row, so the cursor is free to travel in between.
 func TestCtrlTMarksASessionAndMovesItToTheSelectedWorkstream(t *testing.T) {
-	model, controller := newTestModel("/tmp", heikou.BackendCodex)
+	model, controller := newTestModel("/tmp", shepherd.BackendCodex)
 	now := time.Now()
 	core := testWorkstream("018f0000-0000-4000-8000-000000000038", "Core", []string{"/tmp/core"}, now)
 	web := testWorkstream("018f0000-0000-4000-8000-000000000039", "Web", []string{"/tmp/web"}, now)
-	member := testDurableSession("018f0000-0000-4000-8000-00000000003a", core.ID, heikou.BackendCodex, "member", "/tmp/core", now)
+	member := testDurableSession("018f0000-0000-4000-8000-00000000003a", core.ID, shepherd.BackendCodex, "member", "/tmp/core", now)
 	model.setSnapshot(control.Snapshot{Workstreams: []workstream.Workstream{core, web}, Sessions: []control.Session{member}})
 	model.selected = sessionRowKey(member)
 	model.restoreSelection()
@@ -978,9 +978,9 @@ func TestCtrlTMarksASessionAndMovesItToTheSelectedWorkstream(t *testing.T) {
 }
 
 func TestCtrlTOnTheSameSessionCancelsTheMark(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	now := time.Now()
-	session := testDurableSession("018f0000-0000-4000-8000-00000000003e", "", heikou.BackendCodex, "task", "/tmp", now)
+	session := testDurableSession("018f0000-0000-4000-8000-00000000003e", "", shepherd.BackendCodex, "task", "/tmp", now)
 	model.setSnapshot(control.Snapshot{Sessions: []control.Session{session}})
 	model.selected = sessionRowKey(session)
 	model.restoreSelection()
@@ -1006,7 +1006,7 @@ func TestCtrlTOnTheSameSessionCancelsTheMark(t *testing.T) {
 // Adoption stays explicit: an orphan has no durable record to move, so the
 // shared chord issues a different command and refuses the synthetic inbox.
 func TestCtrlTAdoptsAnOrphanIntoANamedWorkstreamOnly(t *testing.T) {
-	model, controller := newTestModel("/tmp", heikou.BackendCodex)
+	model, controller := newTestModel("/tmp", shepherd.BackendCodex)
 	now := time.Now()
 	container := testWorkstream("018f0000-0000-4000-8000-00000000003f", "Core", []string{"/tmp"}, now)
 	orphan := testOrphan("018f0000-0000-4000-8000-00000000003b", "/tmp", now)
@@ -1042,7 +1042,7 @@ func TestCtrlTAdoptsAnOrphanIntoANamedWorkstreamOnly(t *testing.T) {
 }
 
 func TestCreatedWorkstreamBecomesTheDashboardSelection(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendClaude)
+	model, _ := newTestModel("/tmp", shepherd.BackendClaude)
 	now := time.Now()
 	destination := testWorkstream("018f0000-0000-4000-8000-000000000074", "First project", []string{"/tmp"}, now)
 
@@ -1061,7 +1061,7 @@ func TestCreatedWorkstreamBecomesTheDashboardSelection(t *testing.T) {
 
 func TestSettingsAndHelpViewsStayWithinTerminal(t *testing.T) {
 	for _, size := range []struct{ width, height int }{{1, 12}, {2, 12}, {8, 12}, {20, 12}, {40, 15}, {80, 24}, {120, 40}} {
-		model, _ := newTestModel("/tmp", heikou.BackendCodex)
+		model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 		model.width, model.height = size.width, size.height
 		model.screen = screenSettings
 		assertViewFits(t, model.View().Content, size.width, size.height)
@@ -1071,10 +1071,10 @@ func TestSettingsAndHelpViewsStayWithinTerminal(t *testing.T) {
 }
 
 func TestSelectedRowsRemainValidAtNarrowWidths(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	now := time.Now()
 	container := testWorkstream("018f0000-0000-4000-8000-000000000053", "Narrow", []string{"/tmp"}, now)
-	session := testDurableSession("018f0000-0000-4000-8000-000000000054", container.ID, heikou.BackendCodex, "narrow row", "/tmp", now)
+	session := testDurableSession("018f0000-0000-4000-8000-000000000054", container.ID, shepherd.BackendCodex, "narrow row", "/tmp", now)
 	model.setSnapshot(control.Snapshot{Workstreams: []workstream.Workstream{container}, Sessions: []control.Session{session}})
 	model.height = 12
 
@@ -1089,7 +1089,7 @@ func TestSelectedRowsRemainValidAtNarrowWidths(t *testing.T) {
 }
 
 func TestTopBarNamesEveryView(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.width, model.height = 100, 30
 
 	assertMode := func(name string, content string) {
@@ -1118,11 +1118,11 @@ func TestDetailPaneShowsWorkstreamNotesAndArtifactTree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.width, model.height = 100, 30
 	container := testWorkstream("018f0000-0000-4000-8000-000000000054", "Payments", []string{"/tmp"}, time.Now())
 	container.ArtifactDir = artifactDir
-	session := testDurableSession("018f0000-0000-4000-8000-000000000055", container.ID, heikou.BackendCodex, "member", "/tmp", time.Now())
+	session := testDurableSession("018f0000-0000-4000-8000-000000000055", container.ID, shepherd.BackendCodex, "member", "/tmp", time.Now())
 	model.setSnapshot(control.Snapshot{Workstreams: []workstream.Workstream{container}, Sessions: []control.Session{session}})
 	model.selected = workstreamRowKey(container.ID)
 	model.restoreSelection()
@@ -1165,7 +1165,7 @@ func TestF3RefreshPicksUpAnExternalNotesWrite(t *testing.T) {
 	if err := os.WriteFile(notesPath, []byte("before agent edit"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	model, controller := newTestModel("/tmp", heikou.BackendCodex)
+	model, controller := newTestModel("/tmp", shepherd.BackendCodex)
 	model.width, model.height = 100, 30
 	container := testWorkstream("018f0000-0000-4000-8000-000000000022", "Refresh", []string{"/tmp"}, time.Now())
 	container.ArtifactDir = artifactDir
@@ -1206,7 +1206,7 @@ func TestF3RefreshPicksUpAnExternalNotesWrite(t *testing.T) {
 }
 
 func TestLargeContextPaneGivesNotesAndTreeMoreRoom(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.width, model.height = 100, 40
 	container := testWorkstream("018f0000-0000-4000-8000-000000000064", "Deep context", []string{"/tmp"}, time.Now())
 	model.snapshot.Workstreams = []workstream.Workstream{container}
@@ -1246,7 +1246,7 @@ func TestLargeContextPaneGivesNotesAndTreeMoreRoom(t *testing.T) {
 }
 
 func TestArtifactContextIgnoresStaleSelectionRead(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	first := testWorkstream("018f0000-0000-4000-8000-000000000058", "First", []string{"/tmp"}, time.Now())
 	first.ArtifactDir = t.TempDir()
 	second := testWorkstream("018f0000-0000-4000-8000-000000000059", "Second", []string{"/tmp"}, time.Now())
@@ -1275,7 +1275,7 @@ func TestArtifactContextIgnoresStaleSelectionRead(t *testing.T) {
 }
 
 func TestArtifactContextRetriesSelectionWhoseStaleReadCompletedElsewhere(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	first := testWorkstream("018f0000-0000-4000-8000-00000000005a", "First", []string{"/tmp"}, time.Now())
 	first.ArtifactDir = t.TempDir()
 	second := testWorkstream("018f0000-0000-4000-8000-00000000005b", "Second", []string{"/tmp"}, time.Now())
@@ -1320,7 +1320,7 @@ func TestArtifactContextRetriesSelectionWhoseStaleReadCompletedElsewhere(t *test
 }
 
 func TestSnapshotFetchesAreSingleFlightAndRejectLateOlderCompletion(t *testing.T) {
-	model, controller := newTestModel("/tmp", heikou.BackendCodex)
+	model, controller := newTestModel("/tmp", shepherd.BackendCodex)
 	firstCmd := model.requestSnapshot()
 	if firstCmd == nil {
 		t.Fatal("first snapshot request did not start")
@@ -1363,8 +1363,8 @@ func TestSnapshotFetchesAreSingleFlightAndRejectLateOlderCompletion(t *testing.T
 }
 
 func TestPreviewFetchesAreSingleFlightAndRejectLateOlderCompletion(t *testing.T) {
-	model, controller := newTestModel("/tmp", heikou.BackendCodex)
-	session := testDurableSession("018f0000-0000-4000-8000-00000000005c", "", heikou.BackendCodex, "preview", "/tmp", time.Now())
+	model, controller := newTestModel("/tmp", shepherd.BackendCodex)
+	session := testDurableSession("018f0000-0000-4000-8000-00000000005c", "", shepherd.BackendCodex, "preview", "/tmp", time.Now())
 	model.snapshot.Sessions = []control.Session{session}
 	model.setSnapshot(model.snapshot)
 	model.selected = sessionRowKey(session)
@@ -1411,8 +1411,8 @@ func TestPreviewFetchesAreSingleFlightAndRejectLateOlderCompletion(t *testing.T)
 }
 
 func TestPreviewCompletionDoesNotReviveOutputForUnavailableSession(t *testing.T) {
-	model, controller := newTestModel("/tmp", heikou.BackendCodex)
-	session := testDurableSession("018f0000-0000-4000-8000-00000000005d", "", heikou.BackendCodex, "preview", "/tmp", time.Now())
+	model, controller := newTestModel("/tmp", shepherd.BackendCodex)
+	session := testDurableSession("018f0000-0000-4000-8000-00000000005d", "", shepherd.BackendCodex, "preview", "/tmp", time.Now())
 	model.snapshot.Sessions = []control.Session{session}
 	model.setSnapshot(model.snapshot)
 	model.selected = sessionRowKey(session)
@@ -1452,14 +1452,14 @@ func TestPreviewCompletionDoesNotReviveOutputForUnavailableSession(t *testing.T)
 }
 
 func TestListViewportKeepsSelectedSessionVisible(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.width, model.height = 60, 12
 	now := time.Now()
 	container := testWorkstream("018f0000-0000-4000-8000-000000000050", "Many", []string{"/tmp"}, now)
 	model.snapshot.Workstreams = []workstream.Workstream{container}
 	for index := 0; index < 18; index++ {
 		id := "session-" + string(rune('a'+index))
-		model.snapshot.Sessions = append(model.snapshot.Sessions, testDurableSession(id, container.ID, heikou.BackendNoAgent, "task "+id, "/tmp", now))
+		model.snapshot.Sessions = append(model.snapshot.Sessions, testDurableSession(id, container.ID, shepherd.BackendNoAgent, "task "+id, "/tmp", now))
 	}
 	model.setSnapshot(model.snapshot)
 	last := model.snapshot.Sessions[len(model.snapshot.Sessions)-1]
@@ -1472,7 +1472,7 @@ func TestListViewportKeepsSelectedSessionVisible(t *testing.T) {
 }
 
 func TestQuestionMarkHelpDoesNotStealComposerText(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.width, model.height = 80, 24
 	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: '?', Text: "?"}))
 	model = updated.(Model)
@@ -1496,7 +1496,7 @@ func TestQuestionMarkHelpDoesNotStealComposerText(t *testing.T) {
 }
 
 func TestHelpPanelScrolls(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.width, model.height, model.overlay = 50, 12, overlayHelp
 	before := ansi.Strip(model.renderHelp())
 	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgDown}))
@@ -1509,8 +1509,8 @@ func TestHelpPanelScrolls(t *testing.T) {
 }
 
 func TestOpeningHelpCancelsDestructiveConfirmations(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
-	session := testDurableSession("018f0000-0000-4000-8000-000000000054", "", heikou.BackendCodex, "finished", "/tmp", time.Now())
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
+	session := testDurableSession("018f0000-0000-4000-8000-000000000054", "", shepherd.BackendCodex, "finished", "/tmp", time.Now())
 	session.Runtime = nil
 	session.Status = control.StatusStopped
 	model.snapshot.Sessions = []control.Session{session}
@@ -1537,9 +1537,9 @@ func TestOpeningHelpCancelsDestructiveConfirmations(t *testing.T) {
 }
 
 func TestConfiguredComposerKeysDriveActions(t *testing.T) {
-	model, controller := newTestModel("/tmp", heikou.BackendCodex)
+	model, controller := newTestModel("/tmp", shepherd.BackendCodex)
 	model.settings.ComposerKeys = config.ComposerKeys{Reply: "ctrl+shift+n", CycleRunner: "f6", CycleRoot: "alt+r"}
-	session := testDurableSession("018f0000-0000-4000-8000-000000000054", "", heikou.BackendCodex, "original", "/tmp", time.Now())
+	session := testDurableSession("018f0000-0000-4000-8000-000000000054", "", shepherd.BackendCodex, "original", "/tmp", time.Now())
 	model.snapshot.Sessions = []control.Session{session}
 	model.setSnapshot(model.snapshot)
 	model.selected = sessionRowKey(session)
@@ -1574,12 +1574,12 @@ func TestConfiguredComposerKeysDriveActions(t *testing.T) {
 
 	updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab}))
 	model = updated.(Model)
-	if model.backend != heikou.BackendCodex {
+	if model.backend != shepherd.BackendCodex {
 		t.Fatal("default Tab still cycled runner after rebinding")
 	}
 	model.replyTarget = ""
 	updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyF6}))
-	if updated.(Model).backend != heikou.BackendClaude {
+	if updated.(Model).backend != shepherd.BackendClaude {
 		t.Fatal("configured F6 did not cycle runner")
 	}
 }
@@ -1587,8 +1587,8 @@ func TestConfiguredComposerKeysDriveActions(t *testing.T) {
 // The whole point of choosing the destination first is that the commit key is
 // unambiguous: Enter starts a session or replies purely by composer state.
 func TestEnterCommitsToWhicheverDestinationTheComposerShows(t *testing.T) {
-	model, controller := newTestModel("/tmp", heikou.BackendCodex)
-	session := testDurableSession("018f0000-0000-4000-8000-000000000055", "", heikou.BackendCodex, "original", "/tmp", time.Now())
+	model, controller := newTestModel("/tmp", shepherd.BackendCodex)
+	session := testDurableSession("018f0000-0000-4000-8000-000000000055", "", shepherd.BackendCodex, "original", "/tmp", time.Now())
 	model.snapshot.Sessions = []control.Session{session}
 	model.setSnapshot(model.snapshot)
 	model.selected = sessionRowKey(session)
@@ -1637,10 +1637,10 @@ func TestEnterCommitsToWhicheverDestinationTheComposerShows(t *testing.T) {
 // showing the conversation being answered. The pin is still what guarantees
 // delivery; the lock is what stops the screen from disagreeing with it.
 func TestReplyModeLocksTheSelection(t *testing.T) {
-	model, controller := newTestModel("/tmp", heikou.BackendCodex)
+	model, controller := newTestModel("/tmp", shepherd.BackendCodex)
 	now := time.Now()
-	first := testDurableSession("018f0000-0000-4000-8000-000000000056", "", heikou.BackendCodex, "first", "/tmp", now)
-	second := testDurableSession("018f0000-0000-4000-8000-000000000057", "", heikou.BackendCodex, "second", "/tmp", now)
+	first := testDurableSession("018f0000-0000-4000-8000-000000000056", "", shepherd.BackendCodex, "first", "/tmp", now)
+	second := testDurableSession("018f0000-0000-4000-8000-000000000057", "", shepherd.BackendCodex, "second", "/tmp", now)
 	model.snapshot.Sessions = []control.Session{first, second}
 	model.setSnapshot(model.snapshot)
 	model.selected = sessionRowKey(first)
@@ -1675,10 +1675,10 @@ func TestReplyModeLocksTheSelection(t *testing.T) {
 // Navigation unlocks the moment the reply is released, and a multiline draft
 // still gets its own vertical motion while the list is held.
 func TestSelectionUnlocksAfterLeavingReplyMode(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	now := time.Now()
-	first := testDurableSession("018f0000-0000-4000-8000-00000000005c", "", heikou.BackendCodex, "first", "/tmp", now)
-	second := testDurableSession("018f0000-0000-4000-8000-00000000005d", "", heikou.BackendCodex, "second", "/tmp", now)
+	first := testDurableSession("018f0000-0000-4000-8000-00000000005c", "", shepherd.BackendCodex, "first", "/tmp", now)
+	second := testDurableSession("018f0000-0000-4000-8000-00000000005d", "", shepherd.BackendCodex, "second", "/tmp", now)
 	model.snapshot.Sessions = []control.Session{first, second}
 	model.setSnapshot(model.snapshot)
 	model.selected = sessionRowKey(first)
@@ -1705,9 +1705,9 @@ func TestSelectionUnlocksAfterLeavingReplyMode(t *testing.T) {
 // The pin covers one message, not the rest of the conversation: once the reply
 // lands, the composer owes the next Enter a fresh, visible destination.
 func TestADeliveredReplyReleasesItsTarget(t *testing.T) {
-	model, controller := newTestModel("/tmp", heikou.BackendCodex)
+	model, controller := newTestModel("/tmp", shepherd.BackendCodex)
 	model.width, model.height = 100, 24
-	session := testDurableSession("018f0000-0000-4000-8000-000000000061", "", heikou.BackendCodex, "original", "/tmp", time.Now())
+	session := testDurableSession("018f0000-0000-4000-8000-000000000061", "", shepherd.BackendCodex, "original", "/tmp", time.Now())
 	model.snapshot.Sessions = []control.Session{session}
 	model.setSnapshot(model.snapshot)
 	model.selected = sessionRowKey(session)
@@ -1736,7 +1736,7 @@ func TestADeliveredReplyReleasesItsTarget(t *testing.T) {
 	if strings.Contains(plain, "↳ reply ") {
 		t.Fatalf("composer kept the reply prefix after sending:\n%s", plain)
 	}
-	if !strings.Contains(plain, string(heikou.BackendCodex)+" · ") {
+	if !strings.Contains(plain, string(shepherd.BackendCodex)+" · ") {
 		t.Fatalf("composer did not return to the new-session prefix:\n%s", plain)
 	}
 }
@@ -1744,9 +1744,9 @@ func TestADeliveredReplyReleasesItsTarget(t *testing.T) {
 // A refused send leaves the message undelivered, so the destination and the
 // text both have to survive for the retry the user is about to make.
 func TestAFailedReplyKeepsItsTargetAndDraft(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.width, model.height = 100, 24
-	session := testDurableSession("018f0000-0000-4000-8000-000000000062", "", heikou.BackendCodex, "original", "/tmp", time.Now())
+	session := testDurableSession("018f0000-0000-4000-8000-000000000062", "", shepherd.BackendCodex, "original", "/tmp", time.Now())
 	model.snapshot.Sessions = []control.Session{session}
 	model.setSnapshot(model.snapshot)
 	model.selected = sessionRowKey(session)
@@ -1771,9 +1771,9 @@ func TestAFailedReplyKeepsItsTargetAndDraft(t *testing.T) {
 // behind in a composer now aimed at a new session would let the next Enter
 // spawn a real one, which is the expensive direction to get wrong.
 func TestOneEscapeLeavesReplyModeAndTakesTheDraft(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.width, model.height = 100, 24
-	session := testDurableSession("018f0000-0000-4000-8000-000000000058", "", heikou.BackendClaude, "original", "/tmp", time.Now())
+	session := testDurableSession("018f0000-0000-4000-8000-000000000058", "", shepherd.BackendClaude, "original", "/tmp", time.Now())
 	model.snapshot.Sessions = []control.Session{session}
 	model.setSnapshot(model.snapshot)
 	model.selected = sessionRowKey(session)
@@ -1792,7 +1792,7 @@ func TestOneEscapeLeavesReplyModeAndTakesTheDraft(t *testing.T) {
 		t.Fatalf("one Esc should release the reply and its draft: input %q target %q",
 			model.inputValue(), model.replyTarget)
 	}
-	if plain := ansi.Strip(model.View().Content); !strings.Contains(plain, string(heikou.BackendCodex)+" · ") {
+	if plain := ansi.Strip(model.View().Content); !strings.Contains(plain, string(shepherd.BackendCodex)+" · ") {
 		t.Fatalf("composer did not return to the new-session prefix:\n%s", plain)
 	}
 }
@@ -1800,7 +1800,7 @@ func TestOneEscapeLeavesReplyModeAndTakesTheDraft(t *testing.T) {
 // Esc never quits. With an empty composer it parks the cursor on Ungrouped, so
 // a mashed Esc is a reset rather than an exit.
 func TestEscapeResetsToUngroupedInsteadOfQuitting(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.width, model.height = 100, 24
 	now := time.Now()
 	container := testWorkstream("018f0000-0000-4000-8000-00000000005e", "Core", []string{"/tmp"}, now)
@@ -1826,8 +1826,8 @@ func TestEscapeResetsToUngroupedInsteadOfQuitting(t *testing.T) {
 
 // A dead target cannot receive the draft, so the prefix must stop promising it.
 func TestReplyModeReleasesATargetThatStopped(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
-	session := testDurableSession("018f0000-0000-4000-8000-000000000059", "", heikou.BackendCodex, "original", "/tmp", time.Now())
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
+	session := testDurableSession("018f0000-0000-4000-8000-000000000059", "", shepherd.BackendCodex, "original", "/tmp", time.Now())
 	model.snapshot.Sessions = []control.Session{session}
 	model.setSnapshot(model.snapshot)
 	model.selected = sessionRowKey(session)
@@ -1841,7 +1841,7 @@ func TestReplyModeReleasesATargetThatStopped(t *testing.T) {
 	model.snapshotFetch.generation, model.snapshotFetch.activeGeneration = 1, 1
 	updated, _ = model.Update(snapshotMsg{
 		generation: 1,
-		snapshot:   control.Snapshot{Sessions: []control.Session{stopped}, StatePath: "/tmp/heikou-test-state.json"},
+		snapshot:   control.Snapshot{Sessions: []control.Session{stopped}, StatePath: "/tmp/shepherd-test-state.json"},
 	})
 	model = updated.(Model)
 	if model.replyTarget != "" {
@@ -1853,7 +1853,7 @@ func TestReplyModeReleasesATargetThatStopped(t *testing.T) {
 }
 
 func TestReplyKeyRequiresALiveSelection(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	container := testWorkstream("018f0000-0000-4000-8000-000000000060", "Core", []string{"/tmp"}, time.Now())
 	model.snapshot.Workstreams = []workstream.Workstream{container}
 	model.setSnapshot(model.snapshot)
@@ -1875,7 +1875,7 @@ func TestReplyKeyRequiresALiveSelection(t *testing.T) {
 // Enter is no longer overloaded, so cycling is safe mid-draft — which is the
 // point at which you actually discover you want a different runner.
 func TestCycleKeysWorkWhileTheComposerHasText(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	now := time.Now()
 	container := testWorkstream("018f0000-0000-4000-8000-000000000061", "Multi repo", []string{"/tmp/api", "/tmp/web"}, now)
 	model.setSnapshot(control.Snapshot{Workstreams: []workstream.Workstream{container}})
@@ -1885,7 +1885,7 @@ func TestCycleKeysWorkWhileTheComposerHasText(t *testing.T) {
 
 	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab}))
 	model = updated.(Model)
-	if model.backend != heikou.BackendClaude {
+	if model.backend != shepherd.BackendClaude {
 		t.Fatalf("Tab did not cycle the runner mid-draft: %q", model.backend)
 	}
 	updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab, Mod: tea.ModShift}))
@@ -1899,7 +1899,7 @@ func TestCycleKeysWorkWhileTheComposerHasText(t *testing.T) {
 }
 
 func TestSettingsRendersComposerBindings(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.width, model.height, model.screen = 80, 24, screenSettings
 	model.settings.ComposerKeys = config.ComposerKeys{Reply: "ctrl+n", CycleRunner: "f6", CycleRoot: "alt+r"}
 	plain := ansi.Strip(model.View().Content)
@@ -1911,7 +1911,7 @@ func TestSettingsRendersComposerBindings(t *testing.T) {
 }
 
 func TestSmallSettingsPaneScrollsToLaunchCommands(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.width, model.height, model.screen = 40, 15, screenSettings
 	if strings.Contains(ansi.Strip(model.View().Content), "launch commands") {
 		t.Fatal("test fixture no longer needs scrolling")
@@ -1925,8 +1925,8 @@ func TestSmallSettingsPaneScrollsToLaunchCommands(t *testing.T) {
 }
 
 func TestCtrlXStopsRuntimeBeforeDeletingDurableRecord(t *testing.T) {
-	model, controller := newTestModel("/tmp", heikou.BackendCodex)
-	session := testDurableSession("018f0000-0000-4000-8000-000000000060", "", heikou.BackendCodex, "cleanup", "/tmp", time.Now())
+	model, controller := newTestModel("/tmp", shepherd.BackendCodex)
+	session := testDurableSession("018f0000-0000-4000-8000-000000000060", "", shepherd.BackendCodex, "cleanup", "/tmp", time.Now())
 	model.snapshot.Sessions = []control.Session{session}
 	model.setSnapshot(model.snapshot)
 	model.selected = sessionRowKey(session)
@@ -1969,7 +1969,7 @@ func TestCtrlXStopsRuntimeBeforeDeletingDurableRecord(t *testing.T) {
 }
 
 func TestSettingsErrorsSurviveSnapshotRefresh(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.width, model.height, model.screen = 80, 24, screenSettings
 	updated, _ := model.Update(settingsMsg{err: context.DeadlineExceeded})
 	model = updated.(Model)
@@ -1983,7 +1983,7 @@ func TestSettingsErrorsSurviveSnapshotRefresh(t *testing.T) {
 }
 
 func TestPastePreservesMultilineComposer(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	updated, _ := model.Update(tea.PasteMsg{Content: "first line\r\nsecond\tline\nthird"})
 	if got := updated.(Model).inputValue(); got != "first line\nsecond\tline\nthird" {
 		t.Fatalf("input = %q", got)
@@ -1991,7 +1991,7 @@ func TestPastePreservesMultilineComposer(t *testing.T) {
 }
 
 func TestShiftEnterCreatesMultilineLaunch(t *testing.T) {
-	model, controller := newTestModel("/tmp", heikou.BackendCodex)
+	model, controller := newTestModel("/tmp", shepherd.BackendCodex)
 	model.insertText("\tfirst line")
 	updated, cmd := model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter, Mod: tea.ModShift}))
 	model = updated.(Model)
@@ -2016,7 +2016,7 @@ func TestShiftEnterCreatesMultilineLaunch(t *testing.T) {
 }
 
 func TestMacComposerNavigation(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.insertText("alpha beta\ngamma delta")
 	secondLine := len(splitGraphemes("alpha beta\n"))
 
@@ -2057,7 +2057,7 @@ func TestMacComposerNavigation(t *testing.T) {
 }
 
 func TestMacComposerDeletionUsesLogicalLines(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.insertText("alpha beta\ngamma delta")
 	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyBackspace, Mod: tea.ModSuper}))
 	model = updated.(Model)
@@ -2091,7 +2091,7 @@ func TestMacComposerDeletionUsesLogicalLines(t *testing.T) {
 }
 
 func TestMultilineArrowsKeepPreferredColumnAndSelection(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.insertText("abcd\nx\nwxyz")
 	model.inputCursor = len(splitGraphemes("abcd"))
 	selected := model.selected
@@ -2111,7 +2111,7 @@ func TestMultilineArrowsKeepPreferredColumnAndSelection(t *testing.T) {
 }
 
 func TestMultilineComposerViewportFollowsCursor(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.width, model.height = 60, 12
 	model.insertText("line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7")
 	plain := ansi.Strip(model.View().Content)
@@ -2122,7 +2122,7 @@ func TestMultilineComposerViewportFollowsCursor(t *testing.T) {
 }
 
 func TestComposerKeepsSpacesAndGraphemeClusters(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.insertText("a 👩🏽‍💻 e\u0301")
 	if got := model.inputValue(); got != "a 👩🏽‍💻 e\u0301" {
 		t.Fatalf("input = %q", got)
@@ -2133,9 +2133,9 @@ func TestComposerKeepsSpacesAndGraphemeClusters(t *testing.T) {
 }
 
 func TestUntrustedMetadataCannotInjectTerminalEscapes(t *testing.T) {
-	model, _ := newTestModel("/tmp/\x1b]52;c;cm9vdA==\x07root", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp/\x1b]52;c;cm9vdA==\x07root", shepherd.BackendCodex)
 	model.width, model.height = 80, 24
-	session := testDurableSession("018f0000-0000-4000-8000-000000000040", "", heikou.BackendCodex, "safe\x1b]52;c;c2VjcmV0\x07task", "/tmp/\x1b[31mred\x1b[0m", time.Now())
+	session := testDurableSession("018f0000-0000-4000-8000-000000000040", "", shepherd.BackendCodex, "safe\x1b]52;c;c2VjcmV0\x07task", "/tmp/\x1b[31mred\x1b[0m", time.Now())
 	model.snapshot.Sessions = []control.Session{session}
 	model.setSnapshot(model.snapshot)
 	model.selected = sessionRowKey(session)
@@ -2147,23 +2147,23 @@ func TestUntrustedMetadataCannotInjectTerminalEscapes(t *testing.T) {
 	}
 }
 
-func newTestModel(root string, backend heikou.Backend) (Model, *fakeController) {
-	controller := &fakeController{snapshot: control.Snapshot{StatePath: "/tmp/heikou-test-state.json"}}
-	return New(controller, root, backend, config.Store{Path: "/tmp/heikou-test-config.json"}, config.Default()), controller
+func newTestModel(root string, backend shepherd.Backend) (Model, *fakeController) {
+	controller := &fakeController{snapshot: control.Snapshot{StatePath: "/tmp/shepherd-test-state.json"}}
+	return New(controller, root, backend, config.Store{Path: "/tmp/shepherd-test-config.json"}, config.Default()), controller
 }
 
 func testWorkstream(id, name string, roots []string, now time.Time) workstream.Workstream {
 	return workstream.Workstream{ID: id, Name: name, Roots: roots, ArtifactDir: "/tmp/artifacts/" + id, Revision: 1, CreatedAt: now, UpdatedAt: now}
 }
 
-func testDurableSession(id, workstreamID string, backend heikou.Backend, prompt, root string, now time.Time) control.Session {
-	runtime := heikou.Session{ID: id, Name: "h-" + id, PaneID: "%1", Backend: backend, Prompt: prompt, Root: root, CurrentPath: root, Status: heikou.StatusLive, StartedAt: now.Add(-time.Minute), LastActivityAt: now}
+func testDurableSession(id, workstreamID string, backend shepherd.Backend, prompt, root string, now time.Time) control.Session {
+	runtime := shepherd.Session{ID: id, Name: "shepherd-" + id, PaneID: "%1", Backend: backend, Prompt: prompt, Root: root, CurrentPath: root, Status: shepherd.StatusLive, StartedAt: now.Add(-time.Minute), LastActivityAt: now}
 	record := workstream.SessionRecord{ID: id, Backend: backend, InitialPrompt: prompt, InitialRoot: root, CreatedAt: now.Add(-time.Minute), Launch: workstream.LaunchIntent{Status: workstream.LaunchPending}}
 	return control.Session{ID: id, Backend: backend, Prompt: prompt, Root: root, CreatedAt: record.CreatedAt, WorkstreamID: workstreamID, Status: control.StatusLive, Durable: true, Record: record, Runtime: &runtime}
 }
 
 func testOrphan(id, root string, now time.Time) control.Session {
-	runtime := heikou.Session{ID: id, Name: "h-" + id, PaneID: "%2", Backend: heikou.BackendNoAgent, Prompt: "legacy pane", Root: root, CurrentPath: root, Status: heikou.StatusLive, StartedAt: now}
+	runtime := shepherd.Session{ID: id, Name: "shepherd-" + id, PaneID: "%2", Backend: shepherd.BackendNoAgent, Prompt: "legacy pane", Root: root, CurrentPath: root, Status: shepherd.StatusLive, StartedAt: now}
 	return control.Session{ID: id, Backend: runtime.Backend, Prompt: runtime.Prompt, Root: root, CreatedAt: now, Status: control.StatusLive, Orphaned: true, Runtime: &runtime}
 }
 
@@ -2208,7 +2208,7 @@ var ctrlO = tea.KeyPressMsg(tea.Key{Code: 'o', Mod: tea.ModCtrl})
 
 func rootsModel(t *testing.T, roots ...string) (Model, *fakeController, workstream.Workstream) {
 	t.Helper()
-	model, controller := newTestModel("/tmp/cwd", heikou.BackendCodex)
+	model, controller := newTestModel("/tmp/cwd", shepherd.BackendCodex)
 	now := time.Now()
 	container := testWorkstream("018f0000-0000-4000-8000-0000000000c1", "Core", roots, now)
 	model.setSnapshot(control.Snapshot{Workstreams: []workstream.Workstream{container}})
@@ -2386,10 +2386,10 @@ func TestARootThatVanishedUnderTheEditIsRefused(t *testing.T) {
 // The chord is contextual like the others: a session row resolves to the
 // workstream that owns it rather than refusing.
 func TestCtrlOOnASessionEditsItsWorkstreamRoots(t *testing.T) {
-	model, _ := newTestModel("/tmp/cwd", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp/cwd", shepherd.BackendCodex)
 	now := time.Now()
 	container := testWorkstream("018f0000-0000-4000-8000-0000000000c2", "Core", []string{"/tmp/one"}, now)
-	session := testDurableSession("018f0000-0000-4000-8000-0000000000c3", container.ID, heikou.BackendCodex, "task", "/tmp/one", now)
+	session := testDurableSession("018f0000-0000-4000-8000-0000000000c3", container.ID, shepherd.BackendCodex, "task", "/tmp/one", now)
 	model.setSnapshot(control.Snapshot{Workstreams: []workstream.Workstream{container}, Sessions: []control.Session{session}})
 	model.selected = sessionRowKey(session)
 	model.restoreSelection()
@@ -2402,9 +2402,9 @@ func TestCtrlOOnASessionEditsItsWorkstreamRoots(t *testing.T) {
 }
 
 func TestCtrlOOnUngroupedExplainsItHasNoRoots(t *testing.T) {
-	model, _ := newTestModel("/tmp/cwd", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp/cwd", shepherd.BackendCodex)
 	now := time.Now()
-	session := testDurableSession("018f0000-0000-4000-8000-0000000000c4", "", heikou.BackendCodex, "task", "/tmp", now)
+	session := testDurableSession("018f0000-0000-4000-8000-0000000000c4", "", shepherd.BackendCodex, "task", "/tmp", now)
 	model.setSnapshot(control.Snapshot{Sessions: []control.Session{session}})
 	model.selected = ungroupedKey
 	model.restoreSelection()
@@ -2422,9 +2422,9 @@ func TestCtrlOOnUngroupedExplainsItHasNoRoots(t *testing.T) {
 // A reply's destination label carries a session id and a title. Inline it
 // pushes the cursor across the terminal and a short message wraps for nothing.
 func TestReplyModeGivesTheDraftItsOwnLine(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	now := time.Now()
-	session := testDurableSession("018f0000-0000-4000-8000-0000000000c5", "", heikou.BackendClaude, "the initial task", "/tmp", now)
+	session := testDurableSession("018f0000-0000-4000-8000-0000000000c5", "", shepherd.BackendClaude, "the initial task", "/tmp", now)
 	model.setSnapshot(control.Snapshot{Sessions: []control.Session{session}})
 	model.width, model.height = 100, 30
 	model.selected = sessionRowKey(session)
@@ -2449,7 +2449,7 @@ func TestReplyModeGivesTheDraftItsOwnLine(t *testing.T) {
 // Outside a reply the label is short, and naming the destination on the same
 // line as the text is the whole point of the prefix.
 func TestAnOrdinaryComposerKeepsItsLabelInline(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.width, model.height = 100, 30
 	model.insertText("a new task")
 
@@ -2465,9 +2465,9 @@ func TestAnOrdinaryComposerKeepsItsLabelInline(t *testing.T) {
 // The extra row has to come out of the layout budget, or the list grows past
 // the bottom of the terminal the moment a reply is pinned.
 func TestTheReplyLabelRowIsPaidForOutOfTheLayout(t *testing.T) {
-	model, _ := newTestModel("/tmp", heikou.BackendCodex)
+	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	now := time.Now()
-	session := testDurableSession("018f0000-0000-4000-8000-0000000000c6", "", heikou.BackendCodex, "task", "/tmp", now)
+	session := testDurableSession("018f0000-0000-4000-8000-0000000000c6", "", shepherd.BackendCodex, "task", "/tmp", now)
 	model.setSnapshot(control.Snapshot{Sessions: []control.Session{session}})
 	model.width, model.height = 100, 30
 	model.selected = sessionRowKey(session)
@@ -2502,7 +2502,7 @@ func pressArchiveChord(t *testing.T, model Model, at time.Time) (Model, tea.Cmd)
 
 func archiveModel(t *testing.T, sessions ...control.Session) (Model, *fakeController, workstream.Workstream) {
 	t.Helper()
-	model, controller := newTestModel("/tmp/cwd", heikou.BackendCodex)
+	model, controller := newTestModel("/tmp/cwd", shepherd.BackendCodex)
 	container := testWorkstream("018f0000-0000-4000-8000-0000000000d1", "Core", []string{"/tmp/cwd"}, time.Now())
 	for index := range sessions {
 		sessions[index].WorkstreamID = container.ID
@@ -2515,8 +2515,8 @@ func archiveModel(t *testing.T, sessions ...control.Session) (Model, *fakeContro
 
 func TestArchiveChordAsksBeforeItReachesTheCommandPlane(t *testing.T) {
 	now := time.Now()
-	live := testDurableSession("018f0000-0000-4000-8000-0000000000d2", "", heikou.BackendCodex, "still working", "/tmp/cwd", now)
-	stopped := testDurableSession("018f0000-0000-4000-8000-0000000000d3", "", heikou.BackendClaude, "finished", "/tmp/cwd", now)
+	live := testDurableSession("018f0000-0000-4000-8000-0000000000d2", "", shepherd.BackendCodex, "still working", "/tmp/cwd", now)
+	stopped := testDurableSession("018f0000-0000-4000-8000-0000000000d3", "", shepherd.BackendClaude, "finished", "/tmp/cwd", now)
 	stopped.Runtime, stopped.Status = nil, control.StatusStopped
 	model, controller, container := archiveModel(t, live, stopped)
 
@@ -2563,9 +2563,9 @@ func TestArchiveChordAsksBeforeItReachesTheCommandPlane(t *testing.T) {
 
 func TestArchiveChordAnswersToANamedWorkstreamRowOnly(t *testing.T) {
 	now := time.Now()
-	session := testDurableSession("018f0000-0000-4000-8000-0000000000d4", "", heikou.BackendCodex, "task", "/tmp/cwd", now)
+	session := testDurableSession("018f0000-0000-4000-8000-0000000000d4", "", shepherd.BackendCodex, "task", "/tmp/cwd", now)
 	orphan := testOrphan("018f0000-0000-4000-8000-0000000000d5", "/tmp/cwd", now)
-	model, controller := newTestModel("/tmp/cwd", heikou.BackendCodex)
+	model, controller := newTestModel("/tmp/cwd", shepherd.BackendCodex)
 	model.setSnapshot(control.Snapshot{Sessions: []control.Session{session}, Orphans: []control.Session{orphan}})
 
 	for _, test := range []struct{ name, row, want string }{

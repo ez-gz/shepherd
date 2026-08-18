@@ -9,7 +9,7 @@ import (
 )
 
 // Flags written after a positional argument used to be swallowed into that
-// argument, so `h ws create "API work" -C ~/proj` silently produced a
+// argument, so `shepherd ws create "API work" -C ~/proj` silently produced a
 // workstream literally named `API work -C ~/proj` rooted at the wrong
 // directory. Both people and agents compose commands in that order.
 func TestParseAnywhereAcceptsFlagsAroundPositionals(t *testing.T) {
@@ -112,7 +112,7 @@ func (nopWriter) Write(p []byte) (int, error) { return len(p), nil }
 func TestInstallPilotDocsNeverOverwritesWithoutForce(t *testing.T) {
 	base := t.TempDir()
 	t.Setenv("HOME", base)
-	t.Setenv("HEIKOU_HOME", filepath.Join(base, ".heikou"))
+	t.Setenv("SHEPHERD_HOME", filepath.Join(base, ".shepherd"))
 
 	dir, written, err := installPilotDocs(false)
 	if err != nil {
@@ -174,7 +174,7 @@ func TestPilotInstructionsCarryTheLoadBearingRules(t *testing.T) {
 	}
 	for _, required := range []string{
 		"state.json",
-		"h list --json",
+		"shepherd list --json",
 		"--yes",
 		"artifact_dir",
 		"notes.md",
@@ -192,7 +192,7 @@ func TestPilotInstructionsCarryTheLoadBearingRules(t *testing.T) {
 func TestPilotDocsInstallModeIsPrivate(t *testing.T) {
 	base := t.TempDir()
 	t.Setenv("HOME", base)
-	t.Setenv("HEIKOU_HOME", filepath.Join(base, ".heikou"))
+	t.Setenv("SHEPHERD_HOME", filepath.Join(base, ".shepherd"))
 	dir, _, err := installPilotDocs(false)
 	if err != nil {
 		t.Fatal(err)

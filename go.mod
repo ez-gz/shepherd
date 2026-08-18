@@ -1,4 +1,4 @@
-module github.com/zamborg/heikou
+module github.com/ez-gz/shepherd
 
 go 1.25.0
 

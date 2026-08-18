@@ -2,11 +2,11 @@
 
 Status: shipped. Configuration and command sources are implemented; a
 model-written summary is deliberately out of scope because the command source
-already makes it a user's own program rather than Heikou's problem.
+already makes it a user's own program rather than Shepherd's problem.
 
 The second request below — "the runner's own status line" — was answered by
 configuration alone, which turned out to be only half an answer: a user could
-point a slot at a source, and every source Heikou shipped restated something it
+point a slot at a source, and every source Shepherd shipped restated something it
 had already been told. [runner-activity.md](runner-activity.md) is that gap and
 what closed it, and it owns the question of what each runner exposes.
 
@@ -15,7 +15,7 @@ what closed it, and it owns the question of what each runner exposes.
 A session row's **brief** is the one-line cell between its state and its
 runtime. It has a lead and a detail, each filled by the first `BriefSource` in
 an ordered layout with something to say. The interface, the built-in sources
-(title, initial task, latest via Heikou, runner), the separate truncation
+(title, initial task, latest via Shepherd, runner), the separate truncation
 budgets, and the provenance mark are all implemented; see the brief section of
 `docs/DESIGN.md`.
 
@@ -34,7 +34,7 @@ own their status line. Three requests motivate this:
 - **A written summary.** A small model reads the session's recent output and
   keeps a one-line description current.
 
-These are the same feature: a source that produces text Heikou did not already
+These are the same feature: a source that produces text Shepherd did not already
 have. They differ only in where the text comes from and what it costs.
 
 ## What shipped
@@ -56,7 +56,7 @@ the signals that were rejected.
 ## Constraints that are not negotiable
 
 **Sources are argv, never shell strings.** Claude Code's status line is a shell
-command; Heikou has spent its whole design avoiding shell interpolation — argv
+command; Shepherd has spent its whole design avoiding shell interpolation — argv
 arrays in `commands`, `exec` into the runner, tmux buffers for follow-up text,
 integration tests that push shell-looking input through and assert it stays
 literal. A command source takes `["my-status", "--session"]`, not a string.
@@ -99,18 +99,18 @@ text the user typed.
 
 A model-written summary needs no work here, and that is the point of the command
 source rather than a gap in it. A user who wants one writes a program that reads
-`HEIKOU_SESSION_*`, calls whatever model they like, and prints a line. Heikou
+`SHEPHERD_SESSION_*`, calls whatever model they like, and prints a line. Shepherd
 runs it on a cadence, sanitizes the output, bounds it, and marks it as something
 it was told rather than saw.
 
 Building it in would have bought nothing and cost a great deal: the first
 network call and the first API-key handling anywhere in the binary, a provider
 choice baked into a terminal dashboard, and a second way to do what the generic
-source already does. Today Heikou talks to tmux and the filesystem and nothing
+source already does. Today Shepherd talks to tmux and the filesystem and nothing
 else, which is why the install story is one `go install` with nothing to
 configure before first run.
 
-Heikou is the contract layer. It defines what a source is asked, what it may
+Shepherd is the contract layer. It defines what a source is asked, what it may
 return, how often it runs, and how its answer is marked. What a source does to
 produce that line is the user's business.
 

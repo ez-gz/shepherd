@@ -1,15 +1,15 @@
-// Package format holds the presentation helpers that every Heikou surface
+// Package format holds the presentation helpers that every Shepherd surface
 // shares: how long a session has been running, how an id is abbreviated, how a
 // path is shortened, and how untrusted text is made safe to print on one line.
 //
-// These lived separately in cmd/h and internal/ui and drifted. The terminal
-// dashboard learned to render a three-day-old session as "3d" while h list kept
+// These lived separately in cmd/shepherd and internal/ui and drifted. The terminal
+// dashboard learned to render a three-day-old session as "3d" while shepherd list kept
 // reporting "72h00m" for the same session, because the two copies of
 // formatDuration were edited at different times. A user comparing the two
 // surfaces saw a discrepancy that no test could catch, since each copy was
 // self-consistent.
 //
-// The package deliberately imports nothing from the rest of Heikou. It is a
+// The package deliberately imports nothing from the rest of Shepherd. It is a
 // leaf, so any surface can use it without creating a dependency cycle, and
 // there is never a reason to write a second copy.
 package format
@@ -56,7 +56,7 @@ func RelativeTime(value, now time.Time) string {
 // ShortID abbreviates a durable identifier to the prefix a human types.
 //
 // Separators are removed first so that the abbreviation counts six significant
-// characters rather than six bytes of a UUID's layout. Heikou's ids are UUIDs,
+// characters rather than six bytes of a UUID's layout. Shepherd's ids are UUIDs,
 // whose first group is already eight hex digits, so this matters only if the id
 // format ever changes — which is exactly when a silent disagreement between two
 // copies of this function would have been most expensive.
@@ -80,7 +80,7 @@ func CompactPath(path string) string {
 
 // Sanitize strips ANSI sequences and control characters from text that came
 // from an agent's terminal, keeping newlines and tabs so multi-line output
-// remains readable. Everything Heikou prints from a pane passes through here:
+// remains readable. Everything Shepherd prints from a pane passes through here:
 // an escape sequence that survived would let a session's output move the
 // cursor, repaint the dashboard, or hide what it did.
 func Sanitize(value string) string {

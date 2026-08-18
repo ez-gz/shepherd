@@ -1,6 +1,6 @@
 // Package transcript reads what a native runner recorded about a session.
 //
-// It exists because `h peek` cannot answer the most common question about a
+// It exists because `shepherd peek` cannot answer the most common question about a
 // session. A full-screen runner draws on the terminal's alternate screen, which
 // keeps no scrollback, so a capture returns the pane's current frame and
 // nothing that scrolled past it. That is a property of the runtime, not a
@@ -11,9 +11,9 @@
 // A missing transcript is a normal answer, because the file layout belongs to
 // the runner and may change without notice. Nothing here is a claim about
 // whether a session is alive, healthy, or waiting; the runtime state enum
-// remains the only claim Heikou makes about now.
+// remains the only claim Shepherd makes about now.
 //
-// The package is a leaf above the domain types. It never touches Heikou state,
+// The package is a leaf above the domain types. It never touches Shepherd state,
 // never copies a transcript into it, and never writes.
 package transcript
 
@@ -31,8 +31,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/zamborg/heikou/internal/format"
-	"github.com/zamborg/heikou/internal/heikou"
+	"github.com/ez-gz/shepherd/internal/format"
+	"github.com/ez-gz/shepherd/internal/shepherd"
 )
 
 const (
@@ -43,7 +43,7 @@ const (
 
 	// maxTranscriptBytes bounds one read. Transcripts grow without limit and
 	// are owned by another program, so the cap is what keeps a runaway file
-	// from becoming Heikou's memory problem.
+	// from becoming Shepherd's memory problem.
 	maxTranscriptBytes = 64 << 20
 	// maxLineBytes bounds a single record. One tool result carrying a large
 	// file is a normal thing to find in a transcript; it is not a reason to
@@ -78,7 +78,7 @@ const (
 	// initial prompt are — and a cold start on a loaded machine is slow.
 	CodexMatchWindow = 10 * time.Minute
 	// codexMatchBackdate tolerates a rollout timestamped fractionally before the
-	// durable record. Codex cannot start before Heikou asked it to, so this
+	// durable record. Codex cannot start before Shepherd asked it to, so this
 	// covers rounding rather than a real ordering.
 	codexMatchBackdate = 5 * time.Second
 )
@@ -95,7 +95,7 @@ var ErrConversationAmbiguous = errors.New("more than one runner conversation mat
 
 // Availability separates the three answers a caller must be able to tell apart:
 // a transcript that was read, a runner that keeps one but has none for this
-// session, and a runner Heikou cannot locate a transcript for at all. Collapsing
+// session, and a runner Shepherd cannot locate a transcript for at all. Collapsing
 // the last two would report a design limit as a missing file.
 type Availability string
 
@@ -106,7 +106,7 @@ const (
 	// session. A session that never started, or whose transcript was deleted,
 	// lands here.
 	Missing Availability = "missing"
-	// Unsupported means Heikou cannot locate a transcript for this runner, for
+	// Unsupported means Shepherd cannot locate a transcript for this runner, for
 	// a structural reason rather than a missing file.
 	Unsupported Availability = "unsupported"
 )
@@ -152,9 +152,9 @@ type Turn struct {
 // names the runner that supplied it, so a caller can tell an authoritative
 // record from an absent one rather than inferring it from an empty list.
 type Transcript struct {
-	SessionID    string         `json:"session_id"`
-	Runner       heikou.Backend `json:"runner"`
-	Availability Availability   `json:"availability"`
+	SessionID    string           `json:"session_id"`
+	Runner       shepherd.Backend `json:"runner"`
+	Availability Availability     `json:"availability"`
 	// Reason explains anything other than Available, in one line.
 	Reason string `json:"reason,omitempty"`
 	// Path is where the turns were read from. It is reported so a caller can
@@ -177,10 +177,10 @@ type Transcript struct {
 // Request names one session to read. Root is the directory the session was
 // launched in, which is how Claude Code files its transcripts.
 type Request struct {
-	Runner heikou.Backend
+	Runner shepherd.Backend
 	// SessionID is the id the runner filed the transcript under, which is the
-	// runner's conversation id rather than Heikou's durable session id. The two
-	// are equal for a session Heikou launched fresh and differ for a resumed
+	// runner's conversation id rather than Shepherd's durable session id. The two
+	// are equal for a session Shepherd launched fresh and differ for a resumed
 	// one, so a caller holding a session should ask it which id this is.
 	SessionID string
 	Root      string
@@ -200,22 +200,22 @@ type Reader struct {
 }
 
 // ConversationRequest describes one launch precisely enough to recognise the
-// record a runner wrote for it. Every field is durable Heikou state, so the
+// record a runner wrote for it. Every field is durable Shepherd state, so the
 // question can be asked long after the pane is gone and gets the same answer.
 type ConversationRequest struct {
-	Runner heikou.Backend
+	Runner shepherd.Backend
 	// Root is the directory the session was launched in.
 	Root string
-	// StartedAt is when Heikou created the durable record, which is immediately
+	// StartedAt is when Shepherd created the durable record, which is immediately
 	// before it asked the runtime to start.
 	StartedAt time.Time
 	// Prompt is the launch prompt, verbatim. It is the discriminator that makes
 	// a match evidence rather than a guess: two sessions in one directory
-	// minutes apart are common in Heikou and are told apart by what was asked.
+	// minutes apart are common in Shepherd and are told apart by what was asked.
 	Prompt string
 }
 
-// Conversation is a runner-minted conversation Heikou matched to a launch. Path
+// Conversation is a runner-minted conversation Shepherd matched to a launch. Path
 // is reported so the match can be checked against the file it came from.
 type Conversation struct {
 	ID   string
@@ -223,10 +223,10 @@ type Conversation struct {
 }
 
 // FindConversation identifies the conversation a runner minted for one launch,
-// for runners that do not let Heikou name it.
+// for runners that do not let Shepherd name it.
 //
-// It exists only for Codex. Claude takes --session-id, so Heikou never has to
-// look: the id is whatever Heikou chose, and asking the filesystem would turn a
+// It exists only for Codex. Claude takes --session-id, so Shepherd never has to
+// look: the id is whatever Shepherd chose, and asking the filesystem would turn a
 // certainty into an inference. Calling this for any other runner is a
 // programming error and says so.
 //
@@ -236,7 +236,7 @@ type Conversation struct {
 // ErrConversationAmbiguous — because the caller is about to write the answer
 // into durable state and resume against it.
 func (r Reader) FindConversation(request ConversationRequest) (Conversation, error) {
-	if request.Runner != heikou.BackendCodex {
+	if request.Runner != shepherd.BackendCodex {
 		return Conversation{}, fmt.Errorf(
 			"find conversation: runner %q does not mint its own conversation id", request.Runner)
 	}
@@ -440,7 +440,7 @@ func (r Reader) Read(request Request) (Transcript, error) {
 		return result, errors.New("read transcript: session id is empty")
 	}
 
-	if request.Runner != heikou.BackendClaude {
+	if request.Runner != shepherd.BackendClaude {
 		result.Availability = Unsupported
 		result.Reason = unsupportedReason(request.Runner)
 		return result, nil
@@ -471,18 +471,18 @@ func (r Reader) Read(request Request) (Transcript, error) {
 
 // unsupportedReason says why a runner has no locatable transcript, in terms of
 // what would have to change rather than as a bare refusal.
-func unsupportedReason(runner heikou.Backend) string {
+func unsupportedReason(runner shepherd.Backend) string {
 	switch runner {
-	case heikou.BackendCodex:
+	case shepherd.BackendCodex:
 		// Codex does write a rollout file per session, but it mints its own
-		// session id and Heikou never learns it. Matching one by launch
+		// session id and Shepherd never learns it. Matching one by launch
 		// directory and start time would be a guess, and a guess that silently
 		// attributes one session's history to another is worse than no answer.
-		return "codex mints its own session id, so Heikou cannot identify this session's rollout file"
-	case heikou.BackendNoAgent:
+		return "codex mints its own session id, so Shepherd cannot identify this session's rollout file"
+	case shepherd.BackendNoAgent:
 		return "a no-agent session is a plain shell and records no transcript"
 	default:
-		return fmt.Sprintf("runner %q records no transcript Heikou can locate", runner)
+		return fmt.Sprintf("runner %q records no transcript Shepherd can locate", runner)
 	}
 }
 
@@ -514,7 +514,7 @@ func (r Reader) claudeProjects() string {
 // an empty path when there is none.
 //
 // Claude files a transcript as <projects>/<slugged cwd>/<session id>.jsonl, and
-// Heikou owns the session id — it launches `claude --session-id <id>` — so the
+// Shepherd owns the session id — it launches `claude --session-id <id>` — so the
 // file name is exact. The directory name is not: it is the launch directory
 // with separators replaced, and the exact replacement rules belong to Claude.
 // So the slug is a fast path, and the session id is the authority. When the
@@ -560,7 +560,7 @@ func (r Reader) locateClaude(sessionID, root string) (string, error) {
 
 // claudeProjectSlug reproduces Claude Code's directory naming for a launch
 // directory. It is only ever used as a first guess; locateClaude falls back to
-// a scan precisely because this rule is not Heikou's to define.
+// a scan precisely because this rule is not Shepherd's to define.
 func claudeProjectSlug(root string) string {
 	root = strings.TrimSpace(root)
 	if root == "" {

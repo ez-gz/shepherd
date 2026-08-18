@@ -10,8 +10,8 @@ to the status column rather than to the brief.
 [brief-sources.md](brief-sources.md) shipped the *mechanism*: two ordered slots,
 a cache-backed observer, a generic argv command source, a provenance mark. What
 it did not ship was a source that observes the agent. Title, initial task,
-latest-via-Heikou and runner name are four ways of restating what the user
-already told Heikou. A row could say what you asked for and never what happened
+latest-via-Shepherd and runner name are four ways of restating what the user
+already told Shepherd. A row could say what you asked for and never what happened
 next.
 
 So the question this document answers is narrow and factual: **what does a live
@@ -25,19 +25,19 @@ real files under `~/.claude` and `~/.codex` in August 2026, against Claude Code
 ### 1. The transcript — `~/.claude/projects/<slug>/<session id>.jsonl`
 
 This is what shipped. `internal/transcript` already located and parsed it for
-`h history`, and Heikou owns the id in the file name because it launches
+`shepherd history`, and Shepherd owns the id in the file name because it launches
 `claude --session-id <id>`, so the file is identified exactly rather than
 guessed at.
 
 The id in that name is the *conversation*, not the durable session. They are the
-same value for a session Heikou launched fresh and differ the moment one is
+same value for a session Shepherd launched fresh and differ the moment one is
 resumed: `--resume <conversation id>` keeps appending to the original file while
 the new session carries a durable id of its own. So a reader asks the session
 which id its records are filed under — `control.Session.ConversationID` — rather
 than assuming the two are interchangeable. 0.7.2 assumed it, and every resumed
 session's activity line was blank for as long as it ran.
 
-The records are richer than `h history` needed. Across 40 real transcripts the
+The records are richer than `shepherd history` needed. Across 40 real transcripts the
 types present are `assistant`, `user`, `attachment`, `system`, `mode`,
 `ai-title`, `custom-title`, `last-prompt`, `queue-operation`, `pr-link`,
 `agent-name`, `relocated`, `worktree-state`, `file-history-snapshot`,
@@ -54,7 +54,7 @@ line:
   `Task` carries `description`. This is what makes `editing observer.go` and
   `running make check` possible at all.
 - A tool's return value is stored under the **user** role as a `tool_result`
-  block — the trap `h history` already documents.
+  block — the trap `shepherd history` already documents.
 - `isSidechain` marks a subagent's records, which are not this session's work.
 - Every record carries a `timestamp`, and `system` records include
   `subtype: "turn_duration"` with `durationMs` and `messageCount` on some
@@ -62,7 +62,7 @@ line:
   dependable enough to be a primary signal.
 - `ai-title` and `custom-title` records carry Claude Code's *own* one-line name
   for the session — "Verify builds after merging PRs to main". Available and
-  cheap; deliberately unused, because Heikou already has a title slot the user
+  cheap; deliberately unused, because Shepherd already has a title slot the user
   owns and a second automatic title in the same cell would be two answers to one
   question.
 
@@ -84,7 +84,7 @@ shipped.** Claude Code writes one JSON file per running process:
   "kind": "interactive",
   "entrypoint": "cli",
   "version": "2.1.228",
-  "tmux": "h-bb305bb2-5fd7-4f7e-9a44-f48512b7db40:@16.%16",
+  "tmux": "shepherd-bb305bb2-5fd7-4f7e-9a44-f48512b7db40:@16.%16",
   "name": "Say hi!",
   "status": "idle",
   "statusUpdatedAt": 1786722574907
@@ -93,12 +93,12 @@ shipped.** Claude Code writes one JSON file per running process:
 
 Three things make it remarkable:
 
-- It is keyed by **`sessionId`** — the id Heikou minted. No correlation problem.
+- It is keyed by **`sessionId`** — the id Shepherd minted. No correlation problem.
 - `status` is one of `busy`, `shell`, `idle`, `waiting`, and it is written on
   every transition rather than on a timer. A sibling field `waitingFor` carries
   a short phrase for why: `input needed`, `sandbox request`, `dialog open`,
   `worker request`.
-- It already knows the tmux pane. The `tmux` field above is a *Heikou* session
+- It already knows the tmux pane. The `tmux` field above is a *Shepherd* session
   name, unprompted.
 
 `claude agents --json` is the same data through a supported interface: one
@@ -118,17 +118,17 @@ Claude Code has a user-configurable status line: `settings.json` takes
 command with a JSON payload describing the session, then draws the output
 **inside its own alternate-screen UI**.
 
-Heikou cannot cooperate with it, in either direction:
+Shepherd cannot cooperate with it, in either direction:
 
 - It cannot *read* it. The rendered line lives in the pane's alternate screen,
   which keeps no scrollback — the same measured limitation that made
-  `h history` necessary. Capturing the pane returns the current frame, and the
+  `shepherd history` necessary. Capturing the pane returns the current frame, and the
   status line is one row of it, in whatever layout the user's program chose.
-- It should not *write* it. Heikou would have to edit the user's
+- It should not *write* it. Shepherd would have to edit the user's
   `~/.claude/settings.json` to install a shim, which is another program's
-  configuration file. Heikou does not write outside `~/.heikou`.
+  configuration file. Shepherd does not write outside `~/.shepherd`.
 
-There is a third path that costs Heikou nothing: a user who already has a status
+There is a third path that costs Shepherd nothing: a user who already has a status
 line command can have it *also* append a line to a file, and point a
 `brief.sources` command at that file. That works today with no code. It is worth
 mentioning in documentation if anyone asks; it is not worth a feature.
@@ -144,13 +144,13 @@ and the content is **at least as good as Claude's**:
   `time_to_first_token_ms`, and `last_agent_message`), `user_message`,
   `agent_message`, `token_count`, `patch_apply_begin`/`patch_apply_end`.
 - `response_item` records with `custom_tool_call`, whose `input` embeds the real
-  command: `tools.exec_command({"cmd":"h list --json", ...})`.
+  command: `tools.exec_command({"cmd":"shepherd list --json", ...})`.
 
 A Codex status line would be *better* than the Claude one — `task_complete`
 carries the finished reply directly, and there is no ambiguity about turn
 boundaries at all.
 
-**It is blocked on identity, exactly as `h history` reported.** `codex --help`
+**It is blocked on identity, exactly as `shepherd history` reported.** `codex --help`
 on 0.145.0 has no `--session-id`; the TUI mints its own id and never tells the
 launcher. Nothing correlates it back:
 
@@ -160,12 +160,12 @@ launcher. Nothing correlates it back:
   registry, not the CLI's.
 - There is no `~/.claude/sessions` equivalent.
 
-Matching by `session_meta.cwd` plus start time is a guess, and Heikou routinely
+Matching by `session_meta.cwd` plus start time is a guess, and Shepherd routinely
 launches several sessions in the same root, so the collision is the normal case
 rather than the edge case. A guess that attributes one session's activity to
 another is worse than no line.
 
-One correlation route is *not* a guess and is worth recording: Heikou owns the
+One correlation route is *not* a guess and is worth recording: Shepherd owns the
 tmux pane and therefore knows `pane_pid`, and the codex process holds its rollout
 file open, so `lsof -p <pid>` would name the file exactly. **This is untested** —
 there was no live Codex session on the machine during this investigation — and it
@@ -212,9 +212,9 @@ It is the single highest-value follow-up from this investigation.
 outside the alternate screen and installing a shim means writing another
 program's settings file. What would unblock it is Claude Code exporting the
 rendered line somewhere — which, given the per-process file above already exists,
-would be a strictly worse version of a signal Heikou can already read.
+would be a strictly worse version of a signal Shepherd can already read.
 
-**`ai-title`.** Rejected because Heikou already has a title slot the user owns.
+**`ai-title`.** Rejected because Shepherd already has a title slot the user owns.
 What would make it interesting is a distinct question to answer with it — a
 "what is this session about" that is explicitly not the user's title — and no
 such slot exists.
@@ -224,7 +224,7 @@ full-screen runner draws on the alternate screen; `capture-pane` returns the
 current frame and nothing that scrolled past. It is also the heuristic this
 codebase has consistently refused: a spinner glyph is not evidence. One
 exception worth knowing about: `codex --no-alt-screen` runs the TUI inline and
-preserves scrollback, and Heikou owns the runner argv, so a user could set
+preserves scrollback, and Shepherd owns the runner argv, so a user could set
 `commands.codex` to include it. That makes the pane readable — but it makes it
 readable as *terminal text to be scraped*, which is the thing to avoid, not the
 thing to enable.
@@ -240,7 +240,7 @@ here justifies.
   executing from one blocked on an approval prompt. The `waiting` status in the
   per-process file can, and that is where the claim belongs.
 - **Anything in the status column.** The activity source fills a brief slot. The
-  runtime lifecycle enum remains the only claim Heikou makes about now.
+  runtime lifecycle enum remains the only claim Shepherd makes about now.
 - **Any line for a session that is not alive.** The observation is dropped when
   a session stops being alive, because `running make check` beside `exited` is
   the same looks-current failure as freezing a failed source's text.

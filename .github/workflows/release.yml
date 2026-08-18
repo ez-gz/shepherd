@@ -44,7 +44,7 @@ jobs:
       # does not build is a broken install rather than a broken artifact. There
       # is nothing to publish; building here is how the tag is checked.
       - name: Build what the tag installs
-        run: go build -trimpath -o "${RUNNER_TEMP}/h" ./cmd/h
+        run: go build -trimpath -o "${RUNNER_TEMP}/shepherd" ./cmd/shepherd
 
       # The tag is already pushed by the time this runs, so a mismatch cannot be
       # prevented — only reported, loudly, while it is still the newest thing
@@ -53,5 +53,5 @@ jobs:
         if: failure()
         run: |
           echo "::error::Tag ${GITHUB_REF_NAME} is not installable as released."
-          echo "::error::go install github.com/zamborg/heikou/cmd/h@latest now resolves to this tag."
+          echo "::error::go install github.com/ez-gz/shepherd/cmd/shepherd@latest now resolves to this tag."
           echo "::error::Delete the tag, fix the version or the build, and tag again."

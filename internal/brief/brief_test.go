@@ -6,16 +6,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zamborg/heikou/internal/config"
-	"github.com/zamborg/heikou/internal/control"
-	"github.com/zamborg/heikou/internal/heikou"
-	"github.com/zamborg/heikou/internal/workstream"
+	"github.com/ez-gz/shepherd/internal/config"
+	"github.com/ez-gz/shepherd/internal/control"
+	"github.com/ez-gz/shepherd/internal/shepherd"
+	"github.com/ez-gz/shepherd/internal/workstream"
 )
 
 func testSession(title, prompt, latest string) control.Session {
 	return control.Session{
 		ID:              "018f0000-0000-4000-8000-0000000000b1",
-		Backend:         heikou.BackendClaude,
+		Backend:         shepherd.BackendClaude,
 		Prompt:          prompt,
 		LastUserMessage: latest,
 		Root:            "/tmp/project",
@@ -111,7 +111,7 @@ func TestBuiltinSourcesAreProvenAndObservedSourcesAreNot(t *testing.T) {
 		t.Fatalf("configured source did not fill the lead: %+v", observed.Lead)
 	}
 	if observed.Lead.Proven {
-		t.Fatal("a command's output reported itself as proven; Heikou cannot verify what it was told")
+		t.Fatal("a command's output reported itself as proven; Shepherd cannot verify what it was told")
 	}
 }
 
@@ -146,7 +146,7 @@ func TestBriefTextBoundsWhatARowCanHold(t *testing.T) {
 
 func TestFragmentLabelsNameTheSource(t *testing.T) {
 	for id, want := range map[SourceID]string{
-		SourceLatest: "latest via Heikou",
+		SourceLatest: "latest via Shepherd",
 		SourcePrompt: "initial task",
 		SourceTitle:  "title",
 		SourceRunner: "runner",

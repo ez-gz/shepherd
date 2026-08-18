@@ -18,7 +18,7 @@ func TestFileStorePersistsVersionedAtomicState(t *testing.T) {
 	id := "018f0000-0000-4000-8000-000000000010"
 	state, err := store.Mutate(context.Background(), func(state *State) (bool, error) {
 		state.Workstreams = append(state.Workstreams, Workstream{
-			ID: id, Name: "Heikou", ArtifactDir: filepath.Join(base, "data", id),
+			ID: id, Name: "Shepherd", ArtifactDir: filepath.Join(base, "data", id),
 			Roots: []string{base}, Revision: 1, CreatedAt: now, UpdatedAt: now,
 		})
 		return true, nil
@@ -40,7 +40,7 @@ func TestFileStorePersistsVersionedAtomicState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(loaded.Workstreams) != 1 || loaded.Workstreams[0].Name != "Heikou" {
+	if len(loaded.Workstreams) != 1 || loaded.Workstreams[0].Name != "Shepherd" {
 		t.Fatalf("loaded state = %#v", loaded)
 	}
 	unchanged, err := store.Mutate(context.Background(), func(*State) (bool, error) { return false, nil })
@@ -173,7 +173,7 @@ func TestFileStoreLoadMigratesV1FixtureWithoutChangingDomainRevision(t *testing.
 		}
 	}
 	completed := state.Sessions[1]
-	if completed.Launch.Binding == nil || completed.Launch.Binding.Socket != "heikou-v1" ||
+	if completed.Launch.Binding == nil || completed.Launch.Binding.Socket != "shepherd-v1" ||
 		completed.Outcome == nil || completed.Outcome.ExitCode == nil || *completed.Outcome.ExitCode != 7 {
 		t.Fatalf("migrated completed session = %#v", completed)
 	}
@@ -243,7 +243,7 @@ func TestFileStoreLoadsV2TitleFixture(t *testing.T) {
 }
 
 // The v3 fixture carries all three states a session can be in: a conversation
-// Heikou assigned, one it observed, and none at all. A loader that dropped the
+// Shepherd assigned, one it observed, and none at all. A loader that dropped the
 // source, or that silently defaulted an absent registration into a present one,
 // fails here rather than in whatever resumes the wrong conversation.
 func TestFileStoreLoadsV3ConversationFixture(t *testing.T) {
@@ -351,7 +351,7 @@ func TestFileStoreRejectsInvalidVersionedFixturesWithoutRewriting(t *testing.T) 
 		{fixture: "state-v1-invalid.json", want: "invalid launch metadata"},
 		{fixture: "state-v2-unknown-field.json", want: `unknown field "surprise"`},
 		// A file claiming v2 must refuse the v3 registration rather than absorb
-		// it. Absorbing it would let a newer Heikou's state be read, silently
+		// it. Absorbing it would let a newer Shepherd's state be read, silently
 		// stripped of the conversation, and written back as if that were v2.
 		{fixture: "state-v2-rejects-v3-field.json", want: `unknown field "conversation"`},
 		{fixture: "state-v3-unknown-field.json", want: `unknown field "surprise"`},
@@ -428,86 +428,6 @@ func readPersistedState(t *testing.T, path string) State {
 		t.Fatal(err)
 	}
 	return state
-}
-
-func TestRebaseArtifactsRepointsRelocatedDirectories(t *testing.T) {
-	base := t.TempDir()
-	previous := filepath.Join(base, "legacy", "workstreams")
-	current := filepath.Join(base, ".heikou", "workstreams")
-	store := FileStore{Path: filepath.Join(base, ".heikou", "state.json"), Artifacts: current}
-	now := time.Unix(1_700_000_500, 0).UTC()
-
-	inside := "018f0000-0000-4000-8000-0000000000a1"
-	outside := "018f0000-0000-4000-8000-0000000000a2"
-	external := filepath.Join(base, "elsewhere", outside)
-	if _, err := store.Mutate(context.Background(), func(state *State) (bool, error) {
-		state.Workstreams = append(state.Workstreams,
-			Workstream{
-				ID: inside, Name: "Relocated", ArtifactDir: filepath.Join(previous, inside),
-				Roots: []string{base}, Revision: 3, CreatedAt: now, UpdatedAt: now,
-			},
-			Workstream{
-				ID: outside, Name: "Elsewhere", ArtifactDir: external,
-				Roots: []string{base}, Revision: 7, CreatedAt: now, UpdatedAt: now,
-			},
-		)
-		return true, nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	rebased, err := store.RebaseArtifacts(context.Background(), previous)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if rebased != 1 {
-		t.Fatalf("rebased %d workstreams, want 1", rebased)
-	}
-
-	loaded, err := store.Load(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	relocated, ok := loaded.Workstream(inside)
-	if !ok {
-		t.Fatal("relocated workstream missing")
-	}
-	if want := filepath.Join(current, inside); relocated.ArtifactDir != want {
-		t.Fatalf("ArtifactDir = %q, want %q", relocated.ArtifactDir, want)
-	}
-	// A relocation is not a domain edit, so the workstream's own revision and
-	// timestamps must be untouched.
-	if relocated.Revision != 3 || !relocated.UpdatedAt.Equal(now) {
-		t.Fatalf("relocation altered revision/UpdatedAt: %d %v", relocated.Revision, relocated.UpdatedAt)
-	}
-
-	untouched, ok := loaded.Workstream(outside)
-	if !ok {
-		t.Fatal("external workstream missing")
-	}
-	if untouched.ArtifactDir != external {
-		t.Fatalf("ArtifactDir outside the previous base was rewritten to %q", untouched.ArtifactDir)
-	}
-
-	again, err := store.RebaseArtifacts(context.Background(), previous)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if again != 0 {
-		t.Fatalf("second rebase changed %d workstreams, want 0", again)
-	}
-}
-
-func TestRebaseArtifactsIgnoresEmptyPreviousBase(t *testing.T) {
-	base := t.TempDir()
-	store := FileStore{Path: filepath.Join(base, "state.json"), Artifacts: filepath.Join(base, "data")}
-	rebased, err := store.RebaseArtifacts(context.Background(), "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if rebased != 0 {
-		t.Fatalf("rebased %d workstreams for an empty base, want 0", rebased)
-	}
 }
 
 // Exists is the one-time-setup signal, so it must stay false for an

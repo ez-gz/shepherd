@@ -18,14 +18,14 @@ import (
 	"unicode"
 
 	"github.com/charmbracelet/x/ansi"
-	"github.com/zamborg/heikou/internal/env"
-	"github.com/zamborg/heikou/internal/format"
-	"github.com/zamborg/heikou/internal/heikou"
-	"github.com/zamborg/heikou/internal/runner"
+	"github.com/ez-gz/shepherd/internal/env"
+	"github.com/ez-gz/shepherd/internal/format"
+	"github.com/ez-gz/shepherd/internal/runner"
+	"github.com/ez-gz/shepherd/internal/shepherd"
 )
 
 const (
-	DefaultSocket = "heikou"
+	DefaultSocket = "shepherd"
 	// bootstrapVersion is the marker that lets a long-lived server skip
 	// reconfiguration. Bump it whenever the option set changes, or servers
 	// already running keep the configuration they were started with.
@@ -49,7 +49,7 @@ func New(socket string) (*Tmux, error) {
 	}
 	executable, err := os.Executable()
 	if err != nil {
-		return nil, fmt.Errorf("locate heikou executable: %w", err)
+		return nil, fmt.Errorf("locate shepherd executable: %w", err)
 	}
 	return &Tmux{binary: binary, socket: socket, executable: executable}, nil
 }
@@ -80,7 +80,7 @@ func (t *Tmux) Bootstrap(ctx context.Context) error {
 	if _, err := t.run(ctx, nil, "set-option", "-g", "update-environment", strings.Join(environmentNames, " ")); err != nil {
 		return fmt.Errorf("refresh tmux environment policy: %w", err)
 	}
-	marker, _ := t.run(ctx, nil, "show-options", "-sv", "@heikou_bootstrap_version")
+	marker, _ := t.run(ctx, nil, "show-options", "-sv", "@shepherd_bootstrap_version")
 	if strings.TrimSpace(string(marker)) == bootstrapVersion {
 		return nil
 	}
@@ -101,7 +101,7 @@ func (t *Tmux) Bootstrap(ctx context.Context) error {
 		// after this batch.
 		{"set-option", "-as", "terminal-features", ",xterm*:extkeys"},
 		{"bind-key", "-n", "C-\\", "detach-client"},
-		{"set-option", "-s", "@heikou_bootstrap_version", bootstrapVersion},
+		{"set-option", "-s", "@shepherd_bootstrap_version", bootstrapVersion},
 	}
 	args := joinTmuxCommands(commands)
 	if _, err := t.run(ctx, nil, args...); err != nil {
@@ -123,7 +123,7 @@ func (t *Tmux) Bootstrap(ctx context.Context) error {
 // modified keys for every pane; csi-u is the wire format both runners parse.
 //
 // Both are sent alone and neither failure is fatal. "always" and the format
-// option postdate the oldest tmux Heikou supports, and inside the bootstrap
+// option postdate the oldest tmux Shepherd supports, and inside the bootstrap
 // batch an unknown option or value aborts every command after it -- trading the
 // whole configuration for a keyboard nicety. An older server falls back to what
 // it does have and loses only this.
@@ -136,17 +136,17 @@ func (t *Tmux) configureKeyReporting(ctx context.Context) {
 	_, _ = t.run(ctx, nil, "set-option", "-s", "extended-keys-format", "csi-u")
 }
 
-func (t *Tmux) Sessions(ctx context.Context) ([]heikou.Session, error) {
+func (t *Tmux) Sessions(ctx context.Context) ([]shepherd.Session, error) {
 	formatFields := []string{
 		"#{session_name}",
 		"#{pane_id}",
-		"#{@heikou_id}",
-		"#{@heikou_pane}",
-		"#{@heikou_canonical}",
-		"#{@heikou_backend}",
-		"#{@heikou_started}",
-		"#{@heikou_prompt}",
-		"#{@heikou_root}",
+		"#{@shepherd_id}",
+		"#{@shepherd_pane}",
+		"#{@shepherd_canonical}",
+		"#{@shepherd_backend}",
+		"#{@shepherd_started}",
+		"#{@shepherd_prompt}",
+		"#{@shepherd_root}",
 		"#{pane_dead}",
 		"#{pane_dead_status}",
 		"#{pane_dead_time}",
@@ -156,7 +156,7 @@ func (t *Tmux) Sessions(ctx context.Context) ([]heikou.Session, error) {
 		"#{session_attached}",
 		"#{pane_in_mode}",
 		"#{pane_input_off}",
-		"#{@heikou_last_user_message}",
+		"#{@shepherd_last_user_message}",
 	}
 
 	rows, err := t.listPaneFields(ctx, formatFields)
@@ -167,15 +167,15 @@ func (t *Tmux) Sessions(ctx context.Context) ([]heikou.Session, error) {
 		return nil, fmt.Errorf("list tmux panes: %w", err)
 	}
 
-	var sessions []heikou.Session
+	var sessions []shepherd.Session
 	for _, fields := range rows {
-		if fields[2] == "" && strings.HasPrefix(fields[0], "h-") {
-			candidate := strings.TrimPrefix(fields[0], "h-")
+		if fields[2] == "" && strings.HasPrefix(fields[0], "shepherd-") {
+			candidate := strings.TrimPrefix(fields[0], "shepherd-")
 			if validSessionID(candidate) {
 				fields[2] = candidate
 			}
 		}
-		// @heikou_pane is the V0 marker. New sessions receive a pane-scoped
+		// @shepherd_pane is the V0 marker. New sessions receive a pane-scoped
 		// canonical marker in the same tmux command queue that creates them.
 		if fields[2] == "" || (fields[3] != fields[1] && fields[4] != "1") {
 			continue
@@ -195,16 +195,16 @@ func (t *Tmux) Sessions(ctx context.Context) ([]heikou.Session, error) {
 	return sessions, nil
 }
 
-func (t *Tmux) Find(ctx context.Context, query string) (heikou.Session, error) {
+func (t *Tmux) Find(ctx context.Context, query string) (shepherd.Session, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
-		return heikou.Session{}, errors.New("session id is required")
+		return shepherd.Session{}, errors.New("session id is required")
 	}
 	sessions, err := t.Sessions(ctx)
 	if err != nil {
-		return heikou.Session{}, err
+		return shepherd.Session{}, err
 	}
-	var matches []heikou.Session
+	var matches []shepherd.Session
 	for _, session := range sessions {
 		if session.ID == query || session.Name == query {
 			return session, nil
@@ -214,10 +214,10 @@ func (t *Tmux) Find(ctx context.Context, query string) (heikou.Session, error) {
 		}
 	}
 	if len(matches) == 0 {
-		return heikou.Session{}, fmt.Errorf("no session matches %q", query)
+		return shepherd.Session{}, fmt.Errorf("no session matches %q", query)
 	}
 	if len(matches) > 1 {
-		return heikou.Session{}, fmt.Errorf("session prefix %q is ambiguous", query)
+		return shepherd.Session{}, fmt.Errorf("session prefix %q is ambiguous", query)
 	}
 	return matches[0], nil
 }
@@ -233,7 +233,7 @@ func (t *Tmux) RuntimeExists(ctx context.Context, id, boundName string) (bool, e
 		return false, errors.New("runtime id or bound name is required")
 	}
 
-	rows, err := t.listPaneFields(ctx, []string{"#{session_name}", "#{@heikou_id}"})
+	rows, err := t.listPaneFields(ctx, []string{"#{session_name}", "#{@shepherd_id}"})
 	if err != nil {
 		if isMissingServer(err) || strings.Contains(err.Error(), "no current target") {
 			return false, nil
@@ -243,7 +243,7 @@ func (t *Tmux) RuntimeExists(ctx context.Context, id, boundName string) (bool, e
 
 	defaultName := ""
 	if id != "" {
-		defaultName = "h-" + id
+		defaultName = "shepherd-" + id
 	}
 	for _, fields := range rows {
 		if (boundName != "" && fields[0] == boundName) ||
@@ -270,8 +270,8 @@ func (t *Tmux) listPaneFields(ctx context.Context, formatFields []string) ([][]s
 		if err != nil {
 			return nil, err
 		}
-		fieldMarker := "__heikou_field_" + token + "__"
-		recordMarker := "__heikou_record_" + token + "__"
+		fieldMarker := "__shepherd_field_" + token + "__"
+		recordMarker := "__shepherd_record_" + token + "__"
 		format := strings.Join(formatFields, fieldMarker) + recordMarker
 		output, err := t.run(ctx, nil, "list-panes", "-a", "-F", format)
 		if err != nil {
@@ -322,41 +322,41 @@ func parsePaneFields(output []byte, fieldMarker, recordMarker string, fieldCount
 	return rows, nil
 }
 
-func (t *Tmux) Start(ctx context.Context, request heikou.StartRequest) (heikou.Session, error) {
+func (t *Tmux) Start(ctx context.Context, request shepherd.StartRequest) (shepherd.Session, error) {
 	if !validSessionID(request.ID) {
-		return heikou.Session{}, fmt.Errorf("invalid caller-supplied session id %q", request.ID)
+		return shepherd.Session{}, fmt.Errorf("invalid caller-supplied session id %q", request.ID)
 	}
 	if strings.TrimSpace(request.Prompt) == "" {
-		return heikou.Session{}, errors.New("prompt cannot be empty")
+		return shepherd.Session{}, errors.New("prompt cannot be empty")
 	}
-	if _, err := heikou.ParseBackend(string(request.Backend)); err != nil {
-		return heikou.Session{}, err
+	if _, err := shepherd.ParseBackend(string(request.Backend)); err != nil {
+		return shepherd.Session{}, err
 	}
 	var command []string
-	if request.Backend != heikou.BackendNoAgent {
+	if request.Backend != shepherd.BackendNoAgent {
 		var err error
 		command, err = runner.ResolveCommand(request.Backend, request.Command)
 		if err != nil {
-			return heikou.Session{}, err
+			return shepherd.Session{}, err
 		}
 	}
 	root, err := filepath.Abs(request.Root)
 	if err != nil {
-		return heikou.Session{}, fmt.Errorf("resolve root: %w", err)
+		return shepherd.Session{}, fmt.Errorf("resolve root: %w", err)
 	}
 	info, err := os.Stat(root)
 	if err != nil {
-		return heikou.Session{}, fmt.Errorf("open root %q: %w", root, err)
+		return shepherd.Session{}, fmt.Errorf("open root %q: %w", root, err)
 	}
 	if !info.IsDir() {
-		return heikou.Session{}, fmt.Errorf("root %q is not a directory", root)
+		return shepherd.Session{}, fmt.Errorf("root %q is not a directory", root)
 	}
 	if err := t.Bootstrap(ctx); err != nil {
-		return heikou.Session{}, err
+		return shepherd.Session{}, err
 	}
 
 	id := request.ID
-	name := "h-" + id
+	name := "shepherd-" + id
 	title := titleFor(request.Prompt, id)
 	started := time.Now()
 	newSession := []string{
@@ -365,10 +365,10 @@ func (t *Tmux) Start(ctx context.Context, request heikou.StartRequest) (heikou.S
 		"-x", "120", "-y", "36",
 		"-e", env.SessionID + "=" + id,
 	}
-	if request.Backend != heikou.BackendNoAgent {
+	if request.Backend != shepherd.BackendNoAgent {
 		encodedCommand, err := runner.EncodeCommand(command)
 		if err != nil {
-			return heikou.Session{}, fmt.Errorf("encode %s runner command: %w", request.Backend, err)
+			return shepherd.Session{}, fmt.Errorf("encode %s runner command: %w", request.Backend, err)
 		}
 		newSession = append(newSession,
 			t.executable, "__agent", string(request.Backend),
@@ -378,36 +378,36 @@ func (t *Tmux) Start(ctx context.Context, request heikou.StartRequest) (heikou.S
 	}
 	commands := [][]string{
 		newSession,
-		{"set-option", "-t", name, "@heikou_id", id},
-		{"set-option", "-p", "-t", name + ":0.0", "@heikou_canonical", "1"},
-		{"set-option", "-t", name, "@heikou_backend", string(request.Backend)},
-		{"set-option", "-t", name, "@heikou_started", strconv.FormatInt(started.Unix(), 10)},
-		{"set-option", "-t", name, "@heikou_prompt", runner.Encode(request.Prompt)},
-		{"set-option", "-t", name, "@heikou_root", runner.Encode(root)},
+		{"set-option", "-t", name, "@shepherd_id", id},
+		{"set-option", "-p", "-t", name + ":0.0", "@shepherd_canonical", "1"},
+		{"set-option", "-t", name, "@shepherd_backend", string(request.Backend)},
+		{"set-option", "-t", name, "@shepherd_started", strconv.FormatInt(started.Unix(), 10)},
+		{"set-option", "-t", name, "@shepherd_prompt", runner.Encode(request.Prompt)},
+		{"set-option", "-t", name, "@shepherd_root", runner.Encode(root)},
 	}
 	output, err := t.run(ctx, nil, joinTmuxCommands(commands)...)
 	if err != nil {
 		if recovered, ok := t.findAfterAmbiguousStart(id); ok {
 			return recovered, nil
 		}
-		return heikou.Session{}, fmt.Errorf("spawn %s session: %w", request.Backend, err)
+		return shepherd.Session{}, fmt.Errorf("spawn %s session: %w", request.Backend, err)
 	}
 	paneID := strings.TrimSpace(string(output))
 	if paneID == "" {
 		if recovered, ok := t.findAfterAmbiguousStart(id); ok {
 			return recovered, nil
 		}
-		return heikou.Session{}, errors.New("tmux did not return a pane id")
+		return shepherd.Session{}, errors.New("tmux did not return a pane id")
 	}
 
-	return heikou.Session{
+	return shepherd.Session{
 		ID: id, Name: name, PaneID: paneID, Backend: request.Backend,
 		Prompt: request.Prompt, Root: root, CurrentPath: root,
-		Status: heikou.StatusLive, StartedAt: started,
+		Status: shepherd.StatusLive, StartedAt: started,
 	}, nil
 }
 
-func (t *Tmux) Send(ctx context.Context, session heikou.Session, message string) error {
+func (t *Tmux) Send(ctx context.Context, session shepherd.Session, message string) error {
 	if strings.TrimSpace(message) == "" {
 		return errors.New("message cannot be empty")
 	}
@@ -429,7 +429,7 @@ func (t *Tmux) Send(ctx context.Context, session heikou.Session, message string)
 	if err != nil {
 		return err
 	}
-	bufferName := "heikou-" + bufferID
+	bufferName := "shepherd-" + bufferID
 	if _, err := t.run(ctx, []byte(message), "load-buffer", "-b", bufferName, "-"); err != nil {
 		return fmt.Errorf("load message buffer: %w", err)
 	}
@@ -445,12 +445,12 @@ func (t *Tmux) Send(ctx context.Context, session heikou.Session, message string)
 	// Delivery has already succeeded, so presentation metadata is best effort.
 	// Returning an error here could encourage the caller to resend the message.
 	if preview := userMessagePreview(message); preview != "" {
-		_, _ = t.run(ctx, nil, "set-option", "-t", current.Name, "@heikou_last_user_message", runner.Encode(preview))
+		_, _ = t.run(ctx, nil, "set-option", "-t", current.Name, "@shepherd_last_user_message", runner.Encode(preview))
 	}
 	return nil
 }
 
-func (t *Tmux) Capture(ctx context.Context, session heikou.Session, lines int) (string, error) {
+func (t *Tmux) Capture(ctx context.Context, session shepherd.Session, lines int) (string, error) {
 	if lines <= 0 {
 		lines = 80
 	}
@@ -461,14 +461,14 @@ func (t *Tmux) Capture(ctx context.Context, session heikou.Session, lines int) (
 	return cleanCapture(string(output)), nil
 }
 
-func (t *Tmux) Stop(ctx context.Context, session heikou.Session) error {
+func (t *Tmux) Stop(ctx context.Context, session shepherd.Session) error {
 	if err := t.killByName(ctx, session.Name); err != nil {
 		return fmt.Errorf("stop tmux runtime %s: %w", format.ShortID(session.ID), err)
 	}
 	return nil
 }
 
-func (t *Tmux) AttachCommand(session heikou.Session) *exec.Cmd {
+func (t *Tmux) AttachCommand(session shepherd.Session) *exec.Cmd {
 	command := exec.Command(t.binary, "-L", t.socket, "attach-session", "-t", session.Name)
 	command.Env = withoutNestedTmux(os.Environ())
 	command.Stdin = os.Stdin
@@ -482,7 +482,7 @@ func (t *Tmux) killByName(ctx context.Context, name string) error {
 	return err
 }
 
-func (t *Tmux) findAfterAmbiguousStart(id string) (heikou.Session, bool) {
+func (t *Tmux) findAfterAmbiguousStart(id string) (shepherd.Session, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	session, err := t.Find(ctx, id)
@@ -508,22 +508,22 @@ func (t *Tmux) run(ctx context.Context, input []byte, args ...string) ([]byte, e
 	return stdout.Bytes(), nil
 }
 
-func parseSession(fields []string) (heikou.Session, error) {
-	backend, err := heikou.ParseBackend(fields[5])
+func parseSession(fields []string) (shepherd.Session, error) {
+	backend, err := shepherd.ParseBackend(fields[5])
 	if err != nil {
-		return heikou.Session{}, err
+		return shepherd.Session{}, err
 	}
 	startedUnix, err := strconv.ParseInt(fields[6], 10, 64)
 	if err != nil {
-		return heikou.Session{}, err
+		return shepherd.Session{}, err
 	}
 	prompt, err := decodeMetadata(fields[7])
 	if err != nil {
-		return heikou.Session{}, err
+		return shepherd.Session{}, err
 	}
 	root, err := decodeMetadata(fields[8])
 	if err != nil {
-		return heikou.Session{}, err
+		return shepherd.Session{}, err
 	}
 	// This option is optional presentation metadata. A malformed value must not
 	// hide an otherwise valid runtime from discovery.
@@ -533,22 +533,22 @@ func parseSession(fields []string) (heikou.Session, error) {
 	attached, _ := strconv.Atoi(fields[15])
 	paneModeCount, _ := strconv.Atoi(fields[16])
 
-	status := heikou.StatusLive
+	status := shepherd.StatusLive
 	var exitCode *int
 	if fields[9] == "1" {
-		status = heikou.StatusExited
+		status = shepherd.StatusExited
 		if fields[10] != "" {
 			code, err := strconv.Atoi(fields[10])
 			if err != nil {
-				return heikou.Session{}, fmt.Errorf("parse pane exit status %q: %w", fields[10], err)
+				return shepherd.Session{}, fmt.Errorf("parse pane exit status %q: %w", fields[10], err)
 			}
 			exitCode = &code
 			if code != 0 {
-				status = heikou.StatusFailed
+				status = shepherd.StatusFailed
 			}
 		}
 	}
-	return heikou.Session{
+	return shepherd.Session{
 		Name: fields[0], PaneID: fields[1], ID: fields[2], Backend: backend,
 		Prompt: prompt, LastUserMessage: lastUserMessage, Root: root, Status: status,
 		StartedAt: time.Unix(startedUnix, 0), EndedAt: unixTime(deadUnix),
@@ -627,7 +627,7 @@ func titleFor(prompt, id string) string {
 		title = string([]rune(title)[:36])
 	}
 	if title == "" {
-		title = "heikou " + format.ShortID(id)
+		title = "shepherd " + format.ShortID(id)
 	}
 	return title
 }
@@ -696,11 +696,11 @@ func cleanCapture(value string) string {
 // re-read from each client rather than remember, so that a credential the user
 // has since removed cannot survive into a later session.
 //
-// Only the runner overrides are listed from Heikou's own set. The rest are read
-// by the h process rather than by an agent, and HEIKOU_SESSION_ID is written
-// per session with new-session -e: refreshing that one from the attaching
-// client would replace a session's own identity with the identity of whoever
-// attached.
+// Only the runner overrides are listed from Shepherd's own set. The rest are
+// read by the shepherd process rather than by an agent, and
+// SHEPHERD_SESSION_ID is written per session with new-session -e: refreshing
+// that one from the attaching client would replace a session's own identity
+// with the identity of whoever attached.
 var baselineEnvironmentNames = []string{
 	"DISPLAY", "KRB5CCNAME", "SSH_ASKPASS", "SSH_AUTH_SOCK", "SSH_AGENT_PID",
 	"SSH_CONNECTION", "WINDOWID", "XAUTHORITY", "PATH", "SHELL", "USER",

@@ -13,15 +13,15 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/zamborg/heikou/internal/env"
-	"github.com/zamborg/heikou/internal/heikou"
-	"github.com/zamborg/heikou/internal/home"
+	"github.com/ez-gz/shepherd/internal/env"
+	"github.com/ez-gz/shepherd/internal/home"
+	"github.com/ez-gz/shepherd/internal/shepherd"
 )
 
 // Config is intentionally the whole V0 settings model. Commands are argv
 // arrays so flags remain data and never pass through a shell parser.
 type Config struct {
-	DefaultRunner heikou.Backend      `json:"default_runner"`
+	DefaultRunner shepherd.Backend    `json:"default_runner"`
 	Commands      map[string][]string `json:"commands"`
 	ComposerKeys  ComposerKeys        `json:"composer_keys"`
 	Brief         BriefConfig         `json:"brief"`
@@ -37,11 +37,11 @@ type BriefConfig struct {
 	Sources map[string]BriefSourceConfig `json:"sources,omitempty"`
 }
 
-// BriefSourceConfig is a command Heikou runs to fill a slot with text it does
+// BriefSourceConfig is a command Shepherd runs to fill a slot with text it does
 // not already have. Like every other command in this file it is argv rather
 // than a shell string, so arguments stay data and never reach a shell parser.
 //
-// The command receives one session per invocation through HEIKOU_SESSION_*
+// The command receives one session per invocation through SHEPHERD_SESSION_*
 // environment variables and prints one line to stdout. It is never given the
 // session's prompt or messages: those are the user's content, and a brief
 // source is not a reason to hand them to another process.
@@ -54,7 +54,7 @@ type BriefSourceConfig struct {
 	TimeoutSeconds  int `json:"timeout_seconds"`
 }
 
-// BuiltinBriefSources are the names Heikou fills from state it already holds.
+// BuiltinBriefSources are the names Shepherd fills from state it already holds.
 // internal/brief asserts in a test that its own source identifiers match this
 // list, so a rename cannot leave configuration accepting a name that no longer
 // renders anything.
@@ -100,10 +100,10 @@ type Store struct {
 
 func Default() Config {
 	return Config{
-		DefaultRunner: heikou.BackendCodex,
+		DefaultRunner: shepherd.BackendCodex,
 		Commands: map[string][]string{
-			string(heikou.BackendCodex):  {"codex"},
-			string(heikou.BackendClaude): {"claude"},
+			string(shepherd.BackendCodex):  {"codex"},
+			string(shepherd.BackendClaude): {"claude"},
 		},
 		ComposerKeys: ComposerKeys{
 			Reply:       "space",
@@ -158,18 +158,18 @@ func (s Store) Load() (Config, error) {
 		return Config{}, fmt.Errorf("parse settings %q: %w", s.Path, err)
 	}
 	if strings.TrimSpace(disk.DefaultRunner) != "" {
-		backend, err := heikou.ParseBackend(disk.DefaultRunner)
+		backend, err := shepherd.ParseBackend(disk.DefaultRunner)
 		if err != nil {
 			return Config{}, fmt.Errorf("parse settings %q: default_runner: %w", s.Path, err)
 		}
 		settings.DefaultRunner = backend
 	}
 	for name, command := range disk.Commands {
-		backend, err := heikou.ParseBackend(name)
+		backend, err := shepherd.ParseBackend(name)
 		if err != nil {
 			return Config{}, fmt.Errorf("parse settings %q: commands.%s: %w", s.Path, name, err)
 		}
-		if backend == heikou.BackendNoAgent {
+		if backend == shepherd.BackendNoAgent {
 			return Config{}, fmt.Errorf("parse settings %q: commands.no-agent is not allowed; no-agent always starts tmux's default shell", s.Path)
 		}
 		if err := validateCommand(command); err != nil {
@@ -247,7 +247,7 @@ func (s Store) Ensure() error {
 	return nil
 }
 
-func (c Config) Command(backend heikou.Backend) []string {
+func (c Config) Command(backend shepherd.Backend) []string {
 	return append([]string(nil), c.Commands[string(backend)]...)
 }
 
@@ -349,13 +349,13 @@ func (keys optionalComposerKeysJSON) apply(target *ComposerKeys) error {
 		}
 		// A rejection here is the only warning a user gets, and the binding they
 		// wrote looked reasonable to them, so the message says which key, what
-		// Heikou already does with it, and how to get back to a loading file.
+		// Shepherd already does with it, and how to get back to a loading file.
 		if reserved, use, taken := reservedComposerKeyUse(normalized); taken {
 			spelling := ""
 			if reserved != normalized {
 				spelling = fmt.Sprintf(" (the same key as %q)", reserved)
 			}
-			return fmt.Errorf("%s: key %q is reserved by Heikou%s, which already uses it to %s. "+
+			return fmt.Errorf("%s: key %q is reserved by Shepherd%s, which already uses it to %s. "+
 				"Choose a key the dashboard does not answer to, or delete this field to keep the default %q",
 				item.name, normalized, spelling, use, item.fallback)
 		}
@@ -611,7 +611,7 @@ var namedComposerKeys = map[string]struct{}{
 	"select": {}, "space": {}, "tab": {}, "up": {},
 }
 
-// reservedComposerKeys is every key Heikou already answers to, and what it does
+// reservedComposerKeys is every key Shepherd already answers to, and what it does
 // with it. Letting a composer binding claim one would make one of the two
 // actions unreachable, and the composer binding wins, so the loss is silent.
 //
@@ -666,7 +666,7 @@ var reservedComposerKeys = map[string]string{
 	"r":     "reload settings, and restore automatic sizing in resize mode",
 
 	// Composer editing. Several chords are aliases for one action because the
-	// terminal decides which modifier combinations reach Heikou at all.
+	// terminal decides which modifier combinations reach Shepherd at all.
 	"alt+b":           "move one word left",
 	"alt+backspace":   "delete the previous word",
 	"alt+delete":      "delete the next word",
@@ -715,7 +715,7 @@ var reservedComposerKeys = map[string]string{
 // entries in it.
 var reservedComposerKeyAliases = map[string]string{"shift+/": "?"}
 
-// ReservedComposerKeys returns every key Heikou answers to, mapped to what it
+// ReservedComposerKeys returns every key Shepherd answers to, mapped to what it
 // does with it. internal/ui asserts in a test that this is exactly the set of
 // chords it binds, so a chord added to a key switch cannot quietly stay
 // rebindable.
@@ -727,7 +727,7 @@ func ReservedComposerKeys() map[string]string {
 	return reserved
 }
 
-// reservedComposerKeyUse reports what Heikou already does with a normalized key
+// reservedComposerKeyUse reports what Shepherd already does with a normalized key
 // name, and under which spelling it reserves it.
 func reservedComposerKeyUse(normalized string) (string, string, bool) {
 	if target, alias := reservedComposerKeyAliases[normalized]; alias {
@@ -741,15 +741,15 @@ func reservedComposerKeyUse(normalized string) (string, string, bool) {
 
 func applyEnvironment(settings Config) (Config, error) {
 	if value := env.Value(env.DefaultRunner); value != "" {
-		backend, err := heikou.ParseBackend(value)
+		backend, err := shepherd.ParseBackend(value)
 		if err != nil {
 			return Config{}, fmt.Errorf("%s: %w", env.DefaultRunner, err)
 		}
 		settings.DefaultRunner = backend
 	}
-	for backend, name := range map[heikou.Backend]string{
-		heikou.BackendCodex:  env.CodexBinary,
-		heikou.BackendClaude: env.ClaudeBinary,
+	for backend, name := range map[shepherd.Backend]string{
+		shepherd.BackendCodex:  env.CodexBinary,
+		shepherd.BackendClaude: env.ClaudeBinary,
 	} {
 		if value := env.Value(name); value != "" {
 			command := settings.Command(backend)

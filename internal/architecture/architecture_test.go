@@ -14,7 +14,7 @@ import (
 	"testing"
 )
 
-const modulePath = "github.com/zamborg/heikou"
+const modulePath = "github.com/ez-gz/shepherd"
 
 // allowedImports is the intended shape of the module. Each key is a package
 // directory relative to the module root; each value is every package inside the
@@ -22,7 +22,7 @@ const modulePath = "github.com/zamborg/heikou"
 //
 // The layering it describes:
 //
-//   - env, format and heikou are leaves. They import nothing from the module,
+//   - env, format and shepherd are leaves. They import nothing from the module,
 //     so any layer can use them and none of them can create a cycle.
 //   - home, config, runner and workstream own one resource each — the install
 //     directory, settings, runner argv, durable state — and know nothing about
@@ -30,18 +30,18 @@ const modulePath = "github.com/zamborg/heikou"
 //   - supervisor owns tmux. control owns lifecycle policy and is the only
 //     package allowed to combine a supervisor with a store.
 //   - ui renders and never reaches past control.Service.
-//   - cmd/h wires the process together and is the only package permitted to
+//   - cmd/shepherd wires the process together and is the only package permitted to
 //     depend on nearly everything.
 //
 // A package missing from this map fails rather than defaulting to permitted, so
 // a new package has to be placed in the design deliberately.
 var allowedImports = map[string][]string{
-	"cmd/h": {
+	"cmd/shepherd": {
 		"internal/config", "internal/control", "internal/control/controltest",
-		"internal/env", "internal/format", "internal/heikou", "internal/home",
+		"internal/env", "internal/format", "internal/shepherd", "internal/home",
 		"internal/runner", "internal/supervisor", "internal/transcript", "internal/ui",
 		"internal/workstream",
-		"skills/learn-heikou", "skills/manage-heikou",
+		"skills/learn-shepherd", "skills/manage-shepherd",
 	},
 	"internal/architecture": {},
 	// brief sits above control because it describes a session, and above config
@@ -54,29 +54,29 @@ var allowedImports = map[string][]string{
 	// transcript lives.
 	"internal/brief": {
 		"internal/config", "internal/control", "internal/env", "internal/format",
-		"internal/heikou", "internal/transcript", "internal/workstream",
+		"internal/shepherd", "internal/transcript", "internal/workstream",
 	},
-	"internal/config":              {"internal/env", "internal/heikou", "internal/home"},
-	"internal/control":             {"internal/heikou", "internal/workstream"},
+	"internal/config":              {"internal/env", "internal/shepherd", "internal/home"},
+	"internal/control":             {"internal/shepherd", "internal/workstream"},
 	"internal/control/controltest": {"internal/control", "internal/workstream"},
 	"internal/env":                 {},
 	"internal/format":              {},
-	"internal/heikou":              {},
+	"internal/shepherd":            {},
 	"internal/home":                {"internal/env"},
-	"internal/runner":              {"internal/env", "internal/heikou"},
-	"internal/supervisor":          {"internal/env", "internal/format", "internal/heikou", "internal/runner"},
+	"internal/runner":              {"internal/env", "internal/shepherd"},
+	"internal/supervisor":          {"internal/env", "internal/format", "internal/shepherd", "internal/runner"},
 	// transcript reads files another program owns. It sits beside supervisor
 	// rather than above control: reading what a runner recorded needs the
 	// runner's name and nothing else, and giving it the controller would let a
 	// read-only observer reach durable state.
-	"internal/transcript": {"internal/format", "internal/heikou"},
+	"internal/transcript": {"internal/format", "internal/shepherd"},
 	"internal/ui": {
 		"internal/brief", "internal/config", "internal/control", "internal/control/controltest",
-		"internal/format", "internal/heikou", "internal/runner", "internal/workstream",
+		"internal/format", "internal/shepherd", "internal/runner", "internal/workstream",
 	},
-	"internal/workstream":  {"internal/env", "internal/heikou", "internal/home"},
-	"skills/learn-heikou":  {},
-	"skills/manage-heikou": {},
+	"internal/workstream":    {"internal/env", "internal/shepherd", "internal/home"},
+	"skills/learn-shepherd":  {},
+	"skills/manage-shepherd": {},
 }
 
 // singleHomeFunctions names the shared helpers that were forked across packages
@@ -284,10 +284,10 @@ func TestEnvironmentVariableNamesAreWrittenInOnePlace(t *testing.T) {
 				return true
 			}
 			value, err := strconv.Unquote(literal.Value)
-			if err != nil || !strings.HasPrefix(value, "HEIKOU_") {
+			if err != nil || !strings.HasPrefix(value, "SHEPHERD_") {
 				return true
 			}
-			t.Errorf("%s writes %q as a literal; name it in internal/env so one list answers which variables Heikou honours",
+			t.Errorf("%s writes %q as a literal; name it in internal/env so one list answers which variables Shepherd honours",
 				file.path, value)
 			return true
 		})
@@ -295,7 +295,7 @@ func TestEnvironmentVariableNamesAreWrittenInOnePlace(t *testing.T) {
 }
 
 func TestEveryDeclaredNameIsReachableFromTheBinary(t *testing.T) {
-	// cmd/h is the only entry point. A package no path from it can reach is
+	// cmd/shepherd is the only entry point. A package no path from it can reach is
 	// dead weight that still has to be maintained, so it should be noticed.
 	reachable := map[string]bool{}
 	var visit func(string)
@@ -308,13 +308,13 @@ func TestEveryDeclaredNameIsReachableFromTheBinary(t *testing.T) {
 			visit(dependency)
 		}
 	}
-	visit("cmd/h")
+	visit("cmd/shepherd")
 	for pkg := range allowedImports {
 		if pkg == "internal/architecture" {
 			continue // holds tests only, and is reached by no one on purpose
 		}
 		if !reachable[pkg] {
-			t.Errorf("no import path reaches %s from cmd/h", pkg)
+			t.Errorf("no import path reaches %s from cmd/shepherd", pkg)
 		}
 	}
 }

@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zamborg/heikou/internal/config"
-	"github.com/zamborg/heikou/internal/control"
-	"github.com/zamborg/heikou/internal/format"
+	"github.com/ez-gz/shepherd/internal/config"
+	"github.com/ez-gz/shepherd/internal/control"
+	"github.com/ez-gz/shepherd/internal/format"
 )
 
 // SourceID names a source in configuration and in provenance.
@@ -24,13 +24,13 @@ const (
 	SourceTitle SourceID = "title"
 	// SourcePrompt is the immutable task the session was launched with.
 	SourcePrompt SourceID = "prompt"
-	// SourceLatest is the most recent message routed through Heikou. Text typed
+	// SourceLatest is the most recent message routed through Shepherd. Text typed
 	// directly into an attached native TUI is not observable and never appears.
 	SourceLatest SourceID = "latest"
 	// SourceActivity is the last thing the runner recorded the session doing.
 	//
 	// It is the first built-in that observes the agent rather than restating
-	// something Heikou already knew, and it is the first that cannot prove what
+	// something Shepherd already knew, and it is the first that cannot prove what
 	// it says: the phrase is derived from a record another program wrote, so it
 	// renders with the approximate mark. Its text is filled by an Observer, and
 	// a session with nothing cached falls through to the next source.
@@ -43,13 +43,13 @@ const (
 type Fragment struct {
 	Text   string
 	Source SourceID
-	// Proven marks text Heikou can defend from durable state or a tmux
+	// Proven marks text Shepherd can defend from durable state or a tmux
 	// observation. A source that derives, summarizes, guesses, or asks another
 	// program must leave it false, and the row then marks the text approximate.
 	//
 	// Configured command sources are never proven. The command may well be
-	// reporting ground truth from the runner, but Heikou cannot check that, and
-	// the distinction the mark draws is between what Heikou observed and what it
+	// reporting ground truth from the runner, but Shepherd cannot check that, and
+	// the distinction the mark draws is between what Shepherd observed and what it
 	// was told. Reporting an exit code tmux cannot prove as zero would be the
 	// same claim in a different field.
 	Proven bool
@@ -58,12 +58,12 @@ type Fragment struct {
 func (f Fragment) Empty() bool { return strings.TrimSpace(f.Text) == "" }
 
 // Label names a source for surfaces with a whole line to spend. Rows
-// deliberately do not use these: "latest via Heikou · " is twenty columns
+// deliberately do not use these: "latest via Shepherd · " is twenty columns
 // before a single character of message.
 func (id SourceID) Label() string {
 	switch id {
 	case SourceLatest:
-		return "latest via Heikou"
+		return "latest via Shepherd"
 	case SourcePrompt:
 		return "initial task"
 	case SourceTitle:

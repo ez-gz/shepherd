@@ -1,8 +1,8 @@
 package ui
 
 import (
-	"github.com/zamborg/heikou/internal/control"
-	"github.com/zamborg/heikou/internal/workstream"
+	"github.com/ez-gz/shepherd/internal/control"
+	"github.com/ez-gz/shepherd/internal/workstream"
 )
 
 // overviewModel is the UI's small indexed read model. Both primary surfaces

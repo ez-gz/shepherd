@@ -1,7 +1,7 @@
-// Package manageheikou exposes the pilot's operating instructions to the
-// installed Heikou binary, so a fresh installation can write them into the
-// Heikou home directory without a network fetch or a checkout.
-package manageheikou
+// Package manageshepherd exposes the pilot's operating instructions to the
+// installed Shepherd binary, so a fresh installation can write them into the
+// Shepherd home directory without a network fetch or a checkout.
+package manageshepherd
 
 import _ "embed"
 

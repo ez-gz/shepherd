@@ -17,7 +17,7 @@ env:
   # The end-to-end and tmux suites skip themselves when tmux is missing. On a
   # runner that is a failure, not a reason to report green over a suite that
   # never ran.
-  HEIKOU_TEST_REQUIRE_TMUX: "1"
+  SHEPHERD_TEST_REQUIRE_TMUX: "1"
 
 jobs:
   verify:
@@ -30,7 +30,7 @@ jobs:
       matrix:
         os:
           - ubuntu-latest
-          # Heikou drives tmux and the filesystem directly, and its users are
+          # Shepherd drives tmux and the filesystem directly, and its users are
           # largely on macOS. Linux alone would not have caught a difference in
           # either.
           - macos-latest
@@ -85,7 +85,7 @@ jobs:
         run: go test -race ./...
 
       - name: Build
-        run: go build -trimpath -o "${RUNNER_TEMP}/h" ./cmd/h
+        run: go build -trimpath -o "${RUNNER_TEMP}/shepherd" ./cmd/shepherd
 
   # go install compiles on the user's machine, so a platform that stops building
   # is a broken install for whoever is on it — there is no artifact in between
@@ -124,7 +124,7 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
-        run: go build -trimpath -ldflags "-s -w" -o "${RUNNER_TEMP}/heikou" ./cmd/h
+        run: go build -trimpath -ldflags "-s -w" -o "${RUNNER_TEMP}/shepherd" ./cmd/shepherd
 
   # A tag can only be checked once it exists, and by then it is public. This
   # runs the same script on every pull request for the parts it can check

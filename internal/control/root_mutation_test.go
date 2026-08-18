@@ -10,15 +10,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zamborg/heikou/internal/heikou"
-	"github.com/zamborg/heikou/internal/workstream"
+	"github.com/ez-gz/shepherd/internal/shepherd"
+	"github.com/ez-gz/shepherd/internal/workstream"
 )
 
 func TestReplaceRootPreservesOrderAndHistoricalInitialRoot(t *testing.T) {
 	base := t.TempDir()
 	roots := rootMutationDirectories(t, base, "first", "historical", "third", "replacement")
 	repository := newMemoryRepository(base)
-	controller := New(&fakeSupervisor{}, repository, "heikou-test")
+	controller := New(&fakeSupervisor{}, repository, "shepherd-test")
 	createdAt := time.Unix(1_700_000_000, 0).UTC()
 	controller.now = func() time.Time { return createdAt }
 	container := rootMutationWorkstream(t, controller, roots[:3])
@@ -26,7 +26,7 @@ func TestReplaceRootPreservesOrderAndHistoricalInitialRoot(t *testing.T) {
 	const sessionID = "018f0000-0000-4000-8000-000000000061"
 	_, err := repository.Mutate(context.Background(), func(state *workstream.State) (bool, error) {
 		state.Sessions = append(state.Sessions, workstream.SessionRecord{
-			ID: sessionID, Backend: heikou.BackendCodex, InitialPrompt: "historical launch",
+			ID: sessionID, Backend: shepherd.BackendCodex, InitialPrompt: "historical launch",
 			InitialRoot: roots[1], CreatedAt: createdAt,
 			Launch: workstream.LaunchIntent{Status: workstream.LaunchPending},
 		})
@@ -75,7 +75,7 @@ func TestReplaceRootSameNormalizedRootIsNoOp(t *testing.T) {
 	base := t.TempDir()
 	root := rootMutationDirectories(t, base, "root")[0]
 	repository := newMemoryRepository(base)
-	controller := New(&fakeSupervisor{}, repository, "heikou-test")
+	controller := New(&fakeSupervisor{}, repository, "shepherd-test")
 	container := rootMutationWorkstream(t, controller, []string{root})
 	before := rootMutationState(t, repository)
 
@@ -94,7 +94,7 @@ func TestReplaceRootRejectsDuplicateReplacement(t *testing.T) {
 	base := t.TempDir()
 	roots := rootMutationDirectories(t, base, "first", "second")
 	repository := newMemoryRepository(base)
-	controller := New(&fakeSupervisor{}, repository, "heikou-test")
+	controller := New(&fakeSupervisor{}, repository, "shepherd-test")
 	container := rootMutationWorkstream(t, controller, roots)
 	before := rootMutationState(t, repository)
 
@@ -112,7 +112,7 @@ func TestRemoveRootRemovesOneOfMany(t *testing.T) {
 	base := t.TempDir()
 	roots := rootMutationDirectories(t, base, "first", "remove", "third")
 	repository := newMemoryRepository(base)
-	controller := New(&fakeSupervisor{}, repository, "heikou-test")
+	controller := New(&fakeSupervisor{}, repository, "shepherd-test")
 	container := rootMutationWorkstream(t, controller, roots)
 	before := rootMutationState(t, repository)
 	beforeContainer, _ := before.Workstream(container.ID)
@@ -138,7 +138,7 @@ func TestRemoveRootRejectsFinalRootWithoutRevisionChange(t *testing.T) {
 	base := t.TempDir()
 	root := rootMutationDirectories(t, base, "only")[0]
 	repository := newMemoryRepository(base)
-	controller := New(&fakeSupervisor{}, repository, "heikou-test")
+	controller := New(&fakeSupervisor{}, repository, "shepherd-test")
 	container := rootMutationWorkstream(t, controller, []string{root})
 	before := rootMutationState(t, repository)
 
@@ -156,7 +156,7 @@ func TestRootMutationRejectsMissingCurrentRoot(t *testing.T) {
 	base := t.TempDir()
 	roots := rootMutationDirectories(t, base, "registered", "replacement")
 	repository := newMemoryRepository(base)
-	controller := New(&fakeSupervisor{}, repository, "heikou-test")
+	controller := New(&fakeSupervisor{}, repository, "shepherd-test")
 	container := rootMutationWorkstream(t, controller, roots[:1])
 	missing := filepath.Join(base, "missing")
 	before := rootMutationState(t, repository)

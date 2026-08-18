@@ -57,7 +57,7 @@ func TestDevelopmentDocDescribesTheWorkflowsThatExist(t *testing.T) {
 	// that nobody tags by hand. That is only true while the workflow enforcing
 	// it is present and still watching main.
 	tagWorkflow := readRepoFile(t, filepath.Join(".github", "workflows", "tag.yml"))
-	for _, want := range []string{"workflow_run", "branches: [main]", "cmd/h/main.go"} {
+	for _, want := range []string{"workflow_run", "branches: [main]", "cmd/shepherd/main.go"} {
 		if !strings.Contains(tagWorkflow, want) {
 			t.Errorf("tag.yml no longer contains %q; docs/DEVELOPMENT.md promises a workflow that tags main on a version bump", want)
 		}
@@ -66,8 +66,8 @@ func TestDevelopmentDocDescribesTheWorkflowsThatExist(t *testing.T) {
 	development := readRepoFile(t, filepath.Join("docs", "DEVELOPMENT.md"))
 	// The version lives in exactly one place, and the doc has to name it —
 	// pointing a reader at the wrong file is the whole failure this guards.
-	if !strings.Contains(development, "cmd/h/main.go") {
-		t.Error("docs/DEVELOPMENT.md does not name cmd/h/main.go as where the version lives")
+	if !strings.Contains(development, "cmd/shepherd/main.go") {
+		t.Error("docs/DEVELOPMENT.md does not name cmd/shepherd/main.go as where the version lives")
 	}
 	if !strings.Contains(development, "@latest") {
 		t.Error("docs/DEVELOPMENT.md does not explain that @latest resolves to a tag rather than to main")

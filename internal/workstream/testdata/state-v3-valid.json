@@ -5,9 +5,9 @@
     {
       "id": "018f0000-0000-4000-8000-000000000300",
       "name": "Conversation fixture",
-      "artifact_dir": "/tmp/heikou-v3-artifacts/018f0000-0000-4000-8000-000000000300",
+      "artifact_dir": "/tmp/shepherd-v3-artifacts/018f0000-0000-4000-8000-000000000300",
       "roots": [
-        "/tmp/heikou-v3-root"
+        "/tmp/shepherd-v3-root"
       ],
       "revision": 2,
       "created_at": "2024-03-01T00:00:00Z",
@@ -19,15 +19,15 @@
       "id": "018f0000-0000-4000-8000-000000000301",
       "backend": "claude",
       "title": "Assigned at launch",
-      "initial_prompt": "Claude takes the id Heikou chose",
-      "initial_root": "/tmp/heikou-v3-root",
+      "initial_prompt": "Claude takes the id Shepherd chose",
+      "initial_root": "/tmp/shepherd-v3-root",
       "created_at": "2024-03-02T01:02:03Z",
       "launch": {
         "status": "started",
         "binding": {
           "driver": "tmux",
-          "socket": "heikou",
-          "session_name": "h-018f0000-0000-4000-8000-000000000301",
+          "socket": "shepherd",
+          "session_name": "shepherd-018f0000-0000-4000-8000-000000000301",
           "bound_at": "2024-03-02T01:02:04Z"
         }
       },
@@ -41,14 +41,14 @@
       "id": "018f0000-0000-4000-8000-000000000302",
       "backend": "codex",
       "initial_prompt": "Codex mints its own id, so this one was matched later",
-      "initial_root": "/tmp/heikou-v3-root",
+      "initial_root": "/tmp/shepherd-v3-root",
       "created_at": "2024-03-02T02:00:00Z",
       "launch": {
         "status": "started",
         "binding": {
           "driver": "tmux",
-          "socket": "heikou",
-          "session_name": "h-018f0000-0000-4000-8000-000000000302",
+          "socket": "shepherd",
+          "session_name": "shepherd-018f0000-0000-4000-8000-000000000302",
           "bound_at": "2024-03-02T02:00:01Z"
         }
       },
@@ -62,7 +62,7 @@
       "id": "018f0000-0000-4000-8000-000000000303",
       "backend": "codex",
       "initial_prompt": "Nothing proved which rollout was this one",
-      "initial_root": "/tmp/heikou-v3-root",
+      "initial_root": "/tmp/shepherd-v3-root",
       "created_at": "2024-03-02T03:00:00Z",
       "launch": {
         "status": "pending"

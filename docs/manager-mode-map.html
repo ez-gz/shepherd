@@ -813,14 +813,14 @@ svg {
 html&gt;body{padding:0}&lt;/style&gt;
 &lt;/head&gt;
 &lt;body&gt;
-&lt;div id=&quot;heikou-manager-map&quot;&gt;
+&lt;div id=&quot;shepherd-manager-map&quot;&gt;
   &lt;style&gt;
-    #heikou-manager-map {
+    #shepherd-manager-map {
       color: var(--foreground);
       width: 100%;
     }
 
-    #heikou-manager-map .hm-toolbar {
+    #shepherd-manager-map .hm-toolbar {
       display: flex;
       align-items: end;
       justify-content: space-between;
@@ -829,31 +829,31 @@ html&gt;body{padding:0}&lt;/style&gt;
       margin-bottom: 1rem;
     }
 
-    #heikou-manager-map .hm-toolbar .viz-controls {
+    #shepherd-manager-map .hm-toolbar .viz-controls {
       margin: 0;
     }
 
-    #heikou-manager-map .hm-authority {
+    #shepherd-manager-map .hm-authority {
       min-width: min(100%, 18rem);
     }
 
-    #heikou-manager-map .hm-view[hidden] {
+    #shepherd-manager-map .hm-view[hidden] {
       display: none;
     }
 
-    #heikou-manager-map .hm-kicker,
-    #heikou-manager-map .hm-section-label {
+    #shepherd-manager-map .hm-kicker,
+    #shepherd-manager-map .hm-section-label {
       color: var(--muted-foreground);
       font-weight: 500;
     }
 
-    #heikou-manager-map .hm-scope {
+    #shepherd-manager-map .hm-scope {
       border-inline-start: 2px solid var(--border);
       padding-inline-start: 1rem;
       margin-top: 1rem;
     }
 
-    #heikou-manager-map .hm-scope-head {
+    #shepherd-manager-map .hm-scope-head {
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -862,30 +862,30 @@ html&gt;body{padding:0}&lt;/style&gt;
       margin-bottom: 0.75rem;
     }
 
-    #heikou-manager-map .hm-workstreams {
+    #shepherd-manager-map .hm-workstreams {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 1.25rem;
       margin-top: 1rem;
     }
 
-    #heikou-manager-map .hm-workstream {
+    #shepherd-manager-map .hm-workstream {
       border-inline-start: 2px solid var(--border);
       padding-inline-start: 0.75rem;
       min-width: 0;
     }
 
-    #heikou-manager-map .hm-workstream .viz-grid {
+    #shepherd-manager-map .hm-workstream .viz-grid {
       margin-top: 0.75rem;
     }
 
-    #heikou-manager-map .hm-arrow {
+    #shepherd-manager-map .hm-arrow {
       color: var(--muted-foreground);
       text-align: center;
       margin: 0.75rem 0;
     }
 
-    #heikou-manager-map .hm-foundation {
+    #shepherd-manager-map .hm-foundation {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 1.25rem;
@@ -893,11 +893,11 @@ html&gt;body{padding:0}&lt;/style&gt;
       padding-top: 0.75rem;
     }
 
-    #heikou-manager-map .hm-foundation &gt; div {
+    #shepherd-manager-map .hm-foundation &gt; div {
       min-width: 0;
     }
 
-    #heikou-manager-map .hm-flow {
+    #shepherd-manager-map .hm-flow {
       display: flex;
       align-items: center;
       justify-content: center;
@@ -906,11 +906,11 @@ html&gt;body{padding:0}&lt;/style&gt;
       margin: 1.5rem 0;
     }
 
-    #heikou-manager-map .hm-flow-arrow {
+    #shepherd-manager-map .hm-flow-arrow {
       color: var(--muted-foreground);
     }
 
-    #heikou-manager-map .hm-contracts {
+    #shepherd-manager-map .hm-contracts {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 1rem;
@@ -918,30 +918,30 @@ html&gt;body{padding:0}&lt;/style&gt;
       padding-top: 0.75rem;
     }
 
-    #heikou-manager-map .hm-contracts p,
-    #heikou-manager-map .hm-workstream p,
-    #heikou-manager-map .hm-foundation p {
+    #shepherd-manager-map .hm-contracts p,
+    #shepherd-manager-map .hm-workstream p,
+    #shepherd-manager-map .hm-foundation p {
       margin: 0.25rem 0 0;
       color: var(--muted-foreground);
     }
 
-    #heikou-manager-map .hm-roadmap {
+    #shepherd-manager-map .hm-roadmap {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 0.75rem;
       margin: 1.25rem 0;
     }
 
-    #heikou-manager-map .hm-roadmap .btn {
+    #shepherd-manager-map .hm-roadmap .btn {
       width: 100%;
     }
 
-    #heikou-manager-map .hm-roadmap-arrow {
+    #shepherd-manager-map .hm-roadmap-arrow {
       color: var(--muted-foreground);
       text-align: center;
     }
 
-    #heikou-manager-map .hm-detail {
+    #shepherd-manager-map .hm-detail {
       border-top: 1px solid var(--border);
       color: var(--muted-foreground);
       margin: 1rem 0 0;
@@ -949,24 +949,24 @@ html&gt;body{padding:0}&lt;/style&gt;
       min-height: 1.5em;
     }
 
-    #heikou-manager-map .hm-reject {
+    #shepherd-manager-map .hm-reject {
       color: var(--destructive);
     }
 
     @media (max-width: 560px) {
-      #heikou-manager-map .hm-workstreams,
-      #heikou-manager-map .hm-foundation,
-      #heikou-manager-map .hm-contracts,
-      #heikou-manager-map .hm-roadmap {
+      #shepherd-manager-map .hm-workstreams,
+      #shepherd-manager-map .hm-foundation,
+      #shepherd-manager-map .hm-contracts,
+      #shepherd-manager-map .hm-roadmap {
         grid-template-columns: 1fr;
       }
 
-      #heikou-manager-map .hm-flow {
+      #shepherd-manager-map .hm-flow {
         flex-direction: column;
         align-items: stretch;
       }
 
-      #heikou-manager-map .hm-flow-arrow {
+      #shepherd-manager-map .hm-flow-arrow {
         text-align: center;
         transform: rotate(90deg);
       }
@@ -1098,7 +1098,7 @@ html&gt;body{padding:0}&lt;/style&gt;
 
   &lt;script&gt;
     (() =&gt; {
-      const root = document.getElementById(&#x27;heikou-manager-map&#x27;);
+      const root = document.getElementById(&#x27;shepherd-manager-map&#x27;);
       const viewButtons = Array.from(root.querySelectorAll(&#x27;[data-hm-view]&#x27;));
       const panes = Array.from(root.querySelectorAll(&#x27;[data-hm-pane]&#x27;));
       const detail = root.querySelector(&#x27;#hm-detail&#x27;);

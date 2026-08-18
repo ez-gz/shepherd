@@ -1,6 +1,6 @@
 package brief
 
-import "github.com/zamborg/heikou/internal/transcript"
+import "github.com/ez-gz/shepherd/internal/transcript"
 
 // repliedPrefix marks a line that is what the session said when it finished,
 // rather than what it is doing. Without it a finished reply is indistinguishable

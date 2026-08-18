@@ -11,9 +11,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/zamborg/heikou/internal/brief"
-	"github.com/zamborg/heikou/internal/control"
-	"github.com/zamborg/heikou/internal/format"
+	"github.com/ez-gz/shepherd/internal/brief"
+	"github.com/ez-gz/shepherd/internal/control"
+	"github.com/ez-gz/shepherd/internal/format"
 )
 
 const (
@@ -144,7 +144,7 @@ func (m Model) briefGlossaryDescription() string {
 			briefSlotSummary(layout.Detail)
 	}
 	return description + ". A leading " + briefApproximateMark +
-		" marks text Heikou was told rather than observed. Set \"brief\" in settings to change what fills either slot."
+		" marks text Shepherd was told rather than observed. Set \"brief\" in settings to change what fills either slot."
 }
 
 // briefObservationTimeout bounds a whole observation pass. Each configured

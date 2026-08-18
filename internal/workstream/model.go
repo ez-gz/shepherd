@@ -10,7 +10,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/zamborg/heikou/internal/heikou"
+	"github.com/ez-gz/shepherd/internal/shepherd"
 )
 
 const (
@@ -73,20 +73,20 @@ type Outcome struct {
 	RecordedAt time.Time   `json:"recorded_at"`
 }
 
-// ConversationSource records how Heikou came to know a native conversation id.
+// ConversationSource records how Shepherd came to know a native conversation id.
 // The distinction is the whole point of storing it: one of these is a fact
-// Heikou caused, and the other is a match Heikou made against files another
+// Shepherd caused, and the other is a match Shepherd made against files another
 // program wrote. Collapsing them would let an inference be read as a guarantee.
 type ConversationSource string
 
 const (
-	// ConversationAssigned means Heikou chose the id and handed it to the runner
+	// ConversationAssigned means Shepherd chose the id and handed it to the runner
 	// on the command line. The runner had no say, so the id is certain.
 	ConversationAssigned ConversationSource = "assigned"
-	// ConversationObserved means the runner minted its own id and Heikou matched
+	// ConversationObserved means the runner minted its own id and Shepherd matched
 	// a runner-written record back to this launch afterwards. It is evidence,
 	// not a guarantee: see internal/transcript for exactly what must agree
-	// before a match is accepted, and what makes Heikou refuse to record one.
+	// before a match is accepted, and what makes Shepherd refuse to record one.
 	ConversationObserved ConversationSource = "observed"
 )
 
@@ -95,13 +95,13 @@ const (
 // dies, but the runner's conversation is on disk and can be resumed by id.
 //
 // It is deliberately separate from SessionRecord.ID even though the two are
-// equal for a Claude session Heikou launched fresh. That equality is a property
+// equal for a Claude session Shepherd launched fresh. That equality is a property
 // of today's Claude adapter, not of the model — a resumed session carries the
 // conversation of the session it continued, and its own durable id is new.
 type Conversation struct {
 	ID     string             `json:"id"`
 	Source ConversationSource `json:"source"`
-	// RecordedAt is when Heikou registered the id, not when the conversation
+	// RecordedAt is when Shepherd registered the id, not when the conversation
 	// began. For an observed id those differ by however long it took to ask.
 	RecordedAt time.Time `json:"recorded_at"`
 }
@@ -110,8 +110,8 @@ type Conversation struct {
 // and durable outcome. Live process observations remain exclusively in the
 // Supervisor projection.
 type SessionRecord struct {
-	ID      string         `json:"id"`
-	Backend heikou.Backend `json:"backend"`
+	ID      string           `json:"id"`
+	Backend shepherd.Backend `json:"backend"`
 	// Title never renames the tmux runtime or native provider conversation.
 	Title         string       `json:"title,omitempty"`
 	InitialPrompt string       `json:"initial_prompt"`
@@ -120,7 +120,7 @@ type SessionRecord struct {
 	Launch        LaunchIntent `json:"launch"`
 	Outcome       *Outcome     `json:"outcome,omitempty"`
 	// Conversation is the runner's identity for this session's conversation,
-	// absent until Heikou can state it without guessing.
+	// absent until Shepherd can state it without guessing.
 	Conversation *Conversation `json:"conversation,omitempty"`
 }
 
@@ -233,7 +233,7 @@ func (s State) validateVersion(version int) error {
 		if _, exists := sessions[item.ID]; exists {
 			return fmt.Errorf("duplicate session id %q", item.ID)
 		}
-		if _, err := heikou.ParseBackend(string(item.Backend)); err != nil {
+		if _, err := shepherd.ParseBackend(string(item.Backend)); err != nil {
 			return fmt.Errorf("session %s: %w", item.ID, err)
 		}
 		if strings.TrimSpace(item.InitialPrompt) == "" {
@@ -330,7 +330,7 @@ func validateSessionTitle(title string) error {
 }
 
 // validateConversation refuses a registration that cannot be acted on. An
-// absent conversation is the normal state for a session Heikou has not been
+// absent conversation is the normal state for a session Shepherd has not been
 // able to name yet, so nil is valid; a present one must be usable as a runner
 // argument, which is why whitespace and control characters are rejected rather
 // than trimmed.

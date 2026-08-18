@@ -12,8 +12,8 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/zamborg/heikou/internal/heikou"
-	"github.com/zamborg/heikou/internal/workstream"
+	"github.com/ez-gz/shepherd/internal/shepherd"
+	"github.com/ez-gz/shepherd/internal/workstream"
 )
 
 type Status string
@@ -28,10 +28,10 @@ const (
 
 type Session struct {
 	ID      string
-	Backend heikou.Backend
+	Backend shepherd.Backend
 	Prompt  string
 	// LastUserMessage is the latest bounded preview observed from the tmux
-	// runtime. It covers sends through Heikou, not typing in an attached TUI.
+	// runtime. It covers sends through Shepherd, not typing in an attached TUI.
 	LastUserMessage string
 	Root            string
 	CreatedAt       time.Time
@@ -40,22 +40,22 @@ type Session struct {
 	Durable         bool
 	Orphaned        bool
 	Record          workstream.SessionRecord
-	Runtime         *heikou.Session
+	Runtime         *shepherd.Session
 }
 
 // ConversationID is the id the runner filed this session's conversation under,
 // which is what anything reading a runner-written file has to ask for.
 //
 // It is not always the durable session id, and the difference is invisible
-// until it is wrong. A session Heikou launched fresh is `claude --session-id
+// until it is wrong. A session Shepherd launched fresh is `claude --session-id
 // <durable id>`, so the two are equal. A resumed session is launched
 // `--resume <conversation id>` with a durable id of its own, so Claude appends
 // to the file named for the conversation and nothing is ever written under the
 // new session's id. Asking by the durable id there finds no file, forever.
 //
 // The registration's Source is deliberately not consulted. It separates an id
-// Heikou caused from one it matched against a runner's files, which is what
-// must not be blurred when Heikou states provenance — but an observed id is
+// Shepherd caused from one it matched against a runner's files, which is what
+// must not be blurred when Shepherd states provenance — but an observed id is
 // precisely the id that names a file on disk, so it is the better answer to
 // this question and not a worse one.
 func (s Session) ConversationID() string {
@@ -67,7 +67,7 @@ func (s Session) ConversationID() string {
 	return s.ID
 }
 
-// DisplayMessage returns the most recent user message Heikou can honestly
+// DisplayMessage returns the most recent user message Shepherd can honestly
 // observe, falling back to the immutable launch prompt.
 func (s Session) DisplayMessage() string {
 	if strings.TrimSpace(s.LastUserMessage) != "" {
@@ -125,13 +125,13 @@ type Snapshot struct {
 }
 
 type StartRequest struct {
-	Backend      heikou.Backend
+	Backend      shepherd.Backend
 	Prompt       string
 	Root         string
 	WorkstreamID string
 	// resume names a native conversation the new session continues. It is
 	// unexported because it is never a caller's choice: it is filled by the
-	// resume path from a conversation Heikou already registered, so no surface
+	// resume path from a conversation Shepherd already registered, so no surface
 	// can start a session against an id nobody verified.
 	resume string
 }
@@ -160,7 +160,7 @@ type Service interface {
 }
 
 type Controller struct {
-	supervisor           heikou.Supervisor
+	supervisor           shepherd.Supervisor
 	store                workstream.Repository
 	socket               string
 	now                  func() time.Time
@@ -169,7 +169,7 @@ type Controller struct {
 	conversationResolver ConversationResolver
 }
 
-func New(supervisor heikou.Supervisor, store workstream.Repository, socket string, options ...controllerOption) *Controller {
+func New(supervisor shepherd.Supervisor, store workstream.Repository, socket string, options ...controllerOption) *Controller {
 	controller := &Controller{
 		supervisor: supervisor, store: store, socket: socket, now: time.Now,
 		authorizer: localHumanAuthorizer{},
@@ -251,7 +251,7 @@ func (c *Controller) Snapshot(ctx context.Context) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
-	runtimeByID := make(map[string]heikou.Session, len(runtimes))
+	runtimeByID := make(map[string]shepherd.Session, len(runtimes))
 	for _, runtime := range runtimes {
 		runtimeByID[runtime.ID] = runtime
 	}
@@ -360,7 +360,7 @@ func (c *Controller) startLocked(ctx context.Context, request StartRequest) (Ses
 	if strings.TrimSpace(prompt) == "" {
 		return Session{}, errors.New("prompt cannot be empty")
 	}
-	if _, err := heikou.ParseBackend(string(request.Backend)); err != nil {
+	if _, err := shepherd.ParseBackend(string(request.Backend)); err != nil {
 		return Session{}, err
 	}
 	root, err := validateRoot(request.Root)
@@ -401,16 +401,16 @@ func (c *Controller) startLocked(ctx context.Context, request StartRequest) (Ses
 		return Session{}, err
 	}
 
-	var runtime heikou.Session
+	var runtime shepherd.Session
 	var launchErr error
 	var command []string
 	startAttempted := false
-	if request.Backend != heikou.BackendNoAgent && c.commandResolver != nil {
+	if request.Backend != shepherd.BackendNoAgent && c.commandResolver != nil {
 		command, launchErr = c.commandResolver.Resolve(ctx, request.Backend)
 	}
 	if launchErr == nil {
 		startAttempted = true
-		runtime, launchErr = c.supervisor.Start(ctx, heikou.StartRequest{
+		runtime, launchErr = c.supervisor.Start(ctx, shepherd.StartRequest{
 			ID: id, Backend: request.Backend, Prompt: prompt, Root: root, Command: command,
 			Resume: request.resume,
 		})
@@ -465,7 +465,7 @@ func (c *Controller) startLocked(ctx context.Context, request StartRequest) (Ses
 			}
 			// The conversation is registered in the same mutation that records
 			// the binding, because it is known for exactly the same reason: the
-			// launch happened and Heikou chose what it passed. Nothing is read
+			// launch happened and Shepherd chose what it passed. Nothing is read
 			// back from the runner to establish it.
 			if conversation := assignedConversation(request, id, boundAt); conversation != nil {
 				state.Sessions[index].Conversation = conversation
@@ -486,14 +486,14 @@ func (c *Controller) startLocked(ctx context.Context, request StartRequest) (Ses
 }
 
 // assignedConversation returns the conversation a launch is entitled to claim
-// without asking anyone, or nil when the runner did not let Heikou name one.
+// without asking anyone, or nil when the runner did not let Shepherd name one.
 //
-// There are exactly two such cases, and both are facts Heikou caused:
+// There are exactly two such cases, and both are facts Shepherd caused:
 //
 //   - a resume, for any runner, passes the conversation id on the command line,
 //     so the session continues that conversation by construction;
 //   - a fresh Claude session is launched as `claude --session-id <durable id>`,
-//     so Claude's conversation id is Heikou's session id.
+//     so Claude's conversation id is Shepherd's session id.
 //
 // A fresh Codex session gets nil. Codex has no flag for choosing a session id —
 // verified against codex 0.145, which rejects --session-id outright — so its
@@ -505,7 +505,7 @@ func assignedConversation(request StartRequest, id string, at time.Time) *workst
 		return &workstream.Conversation{
 			ID: request.resume, Source: workstream.ConversationAssigned, RecordedAt: at,
 		}
-	case request.Backend == heikou.BackendClaude:
+	case request.Backend == shepherd.BackendClaude:
 		return &workstream.Conversation{
 			ID: id, Source: workstream.ConversationAssigned, RecordedAt: at,
 		}
@@ -515,7 +515,7 @@ func assignedConversation(request StartRequest, id string, at time.Time) *workst
 }
 
 // RegisterConversation learns the conversation id a runner minted for a session
-// Heikou could not name at launch, and records it durably.
+// Shepherd could not name at launch, and records it durably.
 //
 // It is idempotent: a session that already has a registration returns it
 // unchanged rather than re-deriving it. That matters beyond saving work — the
@@ -543,7 +543,7 @@ func (c *Controller) registerConversation(ctx context.Context, id string) (works
 	if record.Conversation != nil {
 		return *record.Conversation, nil
 	}
-	if record.Backend == heikou.BackendNoAgent {
+	if record.Backend == shepherd.BackendNoAgent {
 		return workstream.Conversation{}, fmt.Errorf(
 			"session %q runs a plain shell, which records no conversation to resume", id)
 	}
@@ -791,7 +791,7 @@ func (c *Controller) deleteRuntimeName(record workstream.SessionRecord) (string,
 				record.ID,
 			)
 		}
-		return "h-" + record.ID, nil
+		return "shepherd-" + record.ID, nil
 	}
 	binding := record.Launch.Binding
 	if binding.Socket != c.socket {
@@ -1010,7 +1010,7 @@ func (c *Controller) moveSession(ctx context.Context, sessionID, workstreamID st
 }
 
 // AdoptSession is the explicit migration path for a tmux runtime created by an
-// older Heikou build. Unknown panes remain orphaned until the user invokes this
+// older Shepherd build. Unknown panes remain orphaned until the user invokes this
 // action; reconciliation never adopts them automatically.
 func (c *Controller) AdoptSession(ctx context.Context, sessionID, workstreamID string) (Session, error) {
 	result, err := c.Execute(ctx, humanCommand(scopeForWorkstream(workstreamID), AdoptSessionAction{
@@ -1179,8 +1179,8 @@ func (c *Controller) removeRoot(ctx context.Context, workstreamID, value string)
 	return err
 }
 
-func project(state workstream.State, runtimes []heikou.Session, path string) Snapshot {
-	runtimeByID := make(map[string]heikou.Session, len(runtimes))
+func project(state workstream.State, runtimes []shepherd.Session, path string) Snapshot {
+	runtimeByID := make(map[string]shepherd.Session, len(runtimes))
 	for _, runtime := range runtimes {
 		runtimeByID[runtime.ID] = runtime
 	}
@@ -1191,7 +1191,7 @@ func project(state workstream.State, runtimes []heikou.Session, path string) Sna
 		}
 	}
 	for _, record := range state.Sessions {
-		var runtime *heikou.Session
+		var runtime *shepherd.Session
 		if observed, ok := runtimeByID[record.ID]; ok {
 			copy := observed
 			runtime = &copy
@@ -1223,7 +1223,7 @@ func project(state workstream.State, runtimes []heikou.Session, path string) Sna
 	return snapshot
 }
 
-func projectOne(state workstream.State, record workstream.SessionRecord, runtime *heikou.Session) Session {
+func projectOne(state workstream.State, record workstream.SessionRecord, runtime *shepherd.Session) Session {
 	status := StatusUnavailable
 	if runtime != nil {
 		if runtime.Alive() {
@@ -1254,7 +1254,7 @@ func projectOne(state workstream.State, record workstream.SessionRecord, runtime
 	}
 }
 
-func runtimeBinding(socket string, runtime heikou.Session, now time.Time) workstream.RuntimeBinding {
+func runtimeBinding(socket string, runtime shepherd.Session, now time.Time) workstream.RuntimeBinding {
 	boundAt := runtime.StartedAt
 	if boundAt.IsZero() {
 		boundAt = now

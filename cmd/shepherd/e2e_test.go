@@ -1,6 +1,6 @@
 package main
 
-// End-to-end tests that drive the real `h` binary as a subprocess.
+// End-to-end tests that drive the real `shepherd` binary as a subprocess.
 //
 // Every command handler in this package writes to os.Stdout and resolves its
 // own controller from the environment, so none of them can be called directly
@@ -8,9 +8,9 @@ package main
 // exercises what actually ships: argument dispatch, flag parsing, the exact
 // text of a refusal, the shape of --json, and the exit code. That last set is
 // the contract two audiences depend on — a person at a shell, and the pilot
-// agent following skills/manage-heikou.
+// agent following skills/manage-shepherd.
 //
-// Each test gets its own Heikou home and its own tmux socket, and HOME is
+// Each test gets its own Shepherd home and its own tmux socket, and HOME is
 // redirected too, so a bug in home resolution shows up as a failing test rather
 // than as damage to the developer's real installation.
 
@@ -45,20 +45,20 @@ var (
 	socketSequence atomic.Uint64
 )
 
-// heikouBinary builds the command under test once per run, and only when an
+// shepherdBinary builds the command under test once per run, and only when an
 // end-to-end test actually asks for it, so the unit tests in this package do
 // not pay for a link.
-func heikouBinary(t *testing.T) string {
+func shepherdBinary(t *testing.T) string {
 	t.Helper()
 	buildOnce.Do(func() {
-		builtBinaryDir, buildErr = os.MkdirTemp("", "heikou-e2e")
+		builtBinaryDir, buildErr = os.MkdirTemp("", "shepherd-e2e")
 		if buildErr != nil {
 			return
 		}
-		path := filepath.Join(builtBinaryDir, "h")
+		path := filepath.Join(builtBinaryDir, "shepherd")
 		output, err := exec.Command("go", "build", "-o", path, ".").CombinedOutput()
 		if err != nil {
-			buildErr = fmt.Errorf("build h: %w\n%s", err, output)
+			buildErr = fmt.Errorf("build shepherd: %w\n%s", err, output)
 			return
 		}
 		builtBinary = path
@@ -70,7 +70,7 @@ func heikouBinary(t *testing.T) string {
 }
 
 // requireTmux skips when tmux is absent, unless the environment insists it be
-// present. CI sets HEIKOU_TEST_REQUIRE_TMUX so that a runner which lost its
+// present. CI sets SHEPHERD_TEST_REQUIRE_TMUX so that a runner which lost its
 // tmux install fails loudly instead of reporting a green run over a suite that
 // quietly skipped itself.
 func requireTmux(t *testing.T) {
@@ -78,8 +78,8 @@ func requireTmux(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err == nil {
 		return
 	}
-	if os.Getenv("HEIKOU_TEST_REQUIRE_TMUX") != "" {
-		t.Fatal("HEIKOU_TEST_REQUIRE_TMUX is set but tmux was not found on PATH")
+	if os.Getenv("SHEPHERD_TEST_REQUIRE_TMUX") != "" {
+		t.Fatal("SHEPHERD_TEST_REQUIRE_TMUX is set but tmux was not found on PATH")
 	}
 	t.Skip("tmux is not installed")
 }
@@ -102,7 +102,7 @@ type result struct {
 func newCLI(t *testing.T) *cli {
 	t.Helper()
 	requireTmux(t)
-	binary := heikouBinary(t)
+	binary := shepherdBinary(t)
 
 	base := t.TempDir()
 	project := filepath.Join(base, "project")
@@ -120,7 +120,7 @@ func newCLI(t *testing.T) *cli {
 	// socket directory, and that path is subject to the platform's sockaddr
 	// length limit, so deriving the name from t.Name() risks a truncation
 	// collision on long subtest names.
-	socket := fmt.Sprintf("heikou-e2e-%d-%d", os.Getpid(), socketSequence.Add(1))
+	socket := fmt.Sprintf("shepherd-e2e-%d-%d", os.Getpid(), socketSequence.Add(1))
 
 	harness := &cli{
 		t:        t,
@@ -134,7 +134,7 @@ func newCLI(t *testing.T) *cli {
 	return harness
 }
 
-// shutdown kills the private tmux server and waits for it to go. Heikou sets
+// shutdown kills the private tmux server and waits for it to go. Shepherd sets
 // exit-empty off during bootstrap so the server outlives its last session on
 // purpose; without this the suite would leak one server per test.
 //
@@ -157,7 +157,7 @@ func (c *cli) run(args ...string) result {
 	c.t.Helper()
 	outcome, err := c.execute(args...)
 	if err != nil {
-		c.t.Fatalf("h %s: %v", strings.Join(args, " "), err)
+		c.t.Fatalf("shepherd %s: %v", strings.Join(args, " "), err)
 	}
 	return outcome
 }
@@ -170,18 +170,15 @@ func (c *cli) execute(args ...string) (result, error) {
 	command.Dir = c.project
 	command.Env = append(os.Environ(),
 		"HOME="+c.userHome,
-		"HEIKOU_HOME="+c.home,
-		"HEIKOU_TMUX_SOCKET="+c.socket,
+		"SHEPHERD_HOME="+c.home,
+		"SHEPHERD_TMUX_SOCKET="+c.socket,
 		// Blanked so a developer's own overrides cannot reach into a test.
-		"HEIKOU_CONFIG=",
-		"HEIKOU_STATE=",
-		"HEIKOU_DATA=",
-		"HEIKOU_DEFAULT_RUNNER=",
-		"HEIKOU_CODEX_BIN=",
-		"HEIKOU_CLAUDE_BIN=",
-		"XDG_CONFIG_HOME=",
-		"XDG_STATE_HOME=",
-		"XDG_DATA_HOME=",
+		"SHEPHERD_CONFIG=",
+		"SHEPHERD_STATE=",
+		"SHEPHERD_DATA=",
+		"SHEPHERD_DEFAULT_RUNNER=",
+		"SHEPHERD_CODEX_BIN=",
+		"SHEPHERD_CLAUDE_BIN=",
 	)
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
@@ -207,7 +204,7 @@ func (c *cli) mustRun(args ...string) result {
 	c.t.Helper()
 	outcome := c.run(args...)
 	if outcome.code != 0 {
-		c.t.Fatalf("h %s: exit %d\nstdout: %s\nstderr: %s",
+		c.t.Fatalf("shepherd %s: exit %d\nstdout: %s\nstderr: %s",
 			strings.Join(args, " "), outcome.code, outcome.stdout, outcome.stderr)
 	}
 	return outcome
@@ -220,7 +217,7 @@ func (c *cli) mustFail(args ...string) string {
 	c.t.Helper()
 	outcome := c.run(args...)
 	if outcome.code == 0 {
-		c.t.Fatalf("h %s: expected a nonzero exit, got 0\nstdout: %s",
+		c.t.Fatalf("shepherd %s: expected a nonzero exit, got 0\nstdout: %s",
 			strings.Join(args, " "), outcome.stdout)
 	}
 	return outcome.stdout + outcome.stderr
@@ -259,13 +256,13 @@ func (c *cli) snapshot() snapshotJSON {
 	output := c.mustRun("list", "--json").stdout
 	var snapshot snapshotJSON
 	if err := json.Unmarshal([]byte(output), &snapshot); err != nil {
-		c.t.Fatalf("decode h list --json: %v\noutput: %s", err, output)
+		c.t.Fatalf("decode shepherd list --json: %v\noutput: %s", err, output)
 	}
 	// Every state the CLI reports must be one the pilot has been taught, since
 	// AGENTS.md forbids it from describing a session in words of its own.
 	for _, session := range snapshot.Sessions {
 		if !documentedStates[session.State] {
-			c.t.Fatalf("session %s reported state %q, which skills/manage-heikou does not document",
+			c.t.Fatalf("session %s reported state %q, which skills/manage-shepherd does not document",
 				session.ID, session.State)
 		}
 	}
@@ -284,7 +281,7 @@ func (c *cli) onlySession() snapshotJSON {
 }
 
 // waitForState polls until a session reaches one of the wanted states. tmux
-// reports a pane's death asynchronously, so asserting immediately after h stop
+// reports a pane's death asynchronously, so asserting immediately after shepherd stop
 // would be a race.
 func (c *cli) waitForState(sessionID string, wanted ...string) string {
 	c.t.Helper()
@@ -447,7 +444,7 @@ func TestCLIPeekReportsCurrentFrameOnly(t *testing.T) {
 	}
 	output := harness.mustRun("peek", session.ID, "--json").stdout
 	if err := json.Unmarshal([]byte(output), &peeked); err != nil {
-		t.Fatalf("decode h peek --json: %v\noutput: %s", err, output)
+		t.Fatalf("decode shepherd peek --json: %v\noutput: %s", err, output)
 	}
 	if peeked.SessionID != session.ID {
 		t.Fatalf("peek session_id = %q, want %q", peeked.SessionID, session.ID)
@@ -461,7 +458,7 @@ func TestCLIPeekReportsCurrentFrameOnly(t *testing.T) {
 }
 
 // TestCLIRefusalsExitNonzeroWithTheDocumentedReason covers the guardrails
-// skills/manage-heikou promises. Each of these is a refusal a person or an
+// skills/manage-shepherd promises. Each of these is a refusal a person or an
 // agent will hit, and each message names the way forward.
 func TestCLIRefusalsExitNonzeroWithTheDocumentedReason(t *testing.T) {
 	harness := newCLI(t)
@@ -521,14 +518,14 @@ func TestCLIRefusalsExitNonzeroWithTheDocumentedReason(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			mustContain(t, harness.mustFail(test.args...), test.want, "h "+strings.Join(test.args, " "))
+			mustContain(t, harness.mustFail(test.args...), test.want, "shepherd "+strings.Join(test.args, " "))
 		})
 	}
 }
 
 // TestCLIAcceptsFlagsAfterPositionals is a regression guard. Go's flag package
 // stops parsing at the first positional, so before parseAnywhere existed
-// `h ws create "API work" -C DIR -d TEXT` created a workstream literally named
+// `shepherd ws create "API work" -C DIR -d TEXT` created a workstream literally named
 // `API work -C DIR -d TEXT` rooted at the current directory. It was a silent
 // wrong result, which is the worst kind, and it reached a release.
 func TestCLIAcceptsFlagsAfterPositionals(t *testing.T) {
@@ -543,7 +540,7 @@ func TestCLIAcceptsFlagsAfterPositionals(t *testing.T) {
 		t.Fatalf("workstream description = %q, want the -d value", workstream.Description)
 	}
 
-	// h spawn is the sharpest case: the folded flags silently changed the
+	// shepherd spawn is the sharpest case: the folded flags silently changed the
 	// runner, the root, and the workstream while the command still reported
 	// success, and this is the one verb that launches a real agent into a real
 	// repository.
@@ -560,7 +557,7 @@ func TestCLIAcceptsFlagsAfterPositionals(t *testing.T) {
 	}
 	harness.waitForState(session.ID, "live")
 
-	// h send takes the message as trailing positionals, so a flag written after
+	// shepherd send takes the message as trailing positionals, so a flag written after
 	// it used to be delivered to the agent as text instead of being honoured.
 	sent := harness.mustRun("send", session.ID, "hello there", "--json")
 	var delivery struct {
@@ -568,10 +565,10 @@ func TestCLIAcceptsFlagsAfterPositionals(t *testing.T) {
 		Status    string `json:"status"`
 	}
 	if err := json.Unmarshal([]byte(sent.stdout), &delivery); err != nil {
-		t.Fatalf("h send did not honour a trailing --json: %v\noutput: %s", err, sent.stdout)
+		t.Fatalf("shepherd send did not honour a trailing --json: %v\noutput: %s", err, sent.stdout)
 	}
 	if delivery.Status != "sent" {
-		t.Fatalf("h send status = %q, want sent", delivery.Status)
+		t.Fatalf("shepherd send status = %q, want sent", delivery.Status)
 	}
 
 	// The escape hatch has to work, because it is the only way to pass text
@@ -614,7 +611,7 @@ func TestCLIRefusesAmbiguousPrefixesRatherThanGuessing(t *testing.T) {
 // internal/workstream covers goroutines sharing one FileStore; nothing covered
 // separate processes racing for the same state file.
 //
-// That race is now ordinary rather than exotic: the pilot runs h while the
+// That race is now ordinary rather than exotic: the pilot runs Shepherd while the
 // user has a dashboard open, so two independent writers are the normal case.
 func TestCLIConcurrentWritersDoNotLoseUpdates(t *testing.T) {
 	harness := newCLI(t)
@@ -670,7 +667,7 @@ func TestCLIConcurrentWritersDoNotLoseUpdates(t *testing.T) {
 }
 
 // TestCLIWritesNothingOutsideItsHome guards the isolation the rest of this file
-// depends on, and the promise h makes to a user who sets HEIKOU_HOME.
+// depends on, and the promise Shepherd makes to a user who sets SHEPHERD_HOME.
 func TestCLIWritesNothingOutsideItsHome(t *testing.T) {
 	harness := newCLI(t)
 	surrounding := filepath.Dir(harness.home)
@@ -686,18 +683,18 @@ func TestCLIWritesNothingOutsideItsHome(t *testing.T) {
 		switch entry.Name() {
 		case "home", "project", "user":
 		default:
-			t.Fatalf("h wrote %q outside its home directory", entry.Name())
+			t.Fatalf("shepherd wrote %q outside its home directory", entry.Name())
 		}
 	}
-	// HEIKOU_HOME is set, so nothing may fall back to ~/.heikou.
-	if _, err := os.Stat(filepath.Join(harness.userHome, ".heikou")); !os.IsNotExist(err) {
-		t.Fatalf("h created ~/.heikou despite HEIKOU_HOME being set: %v", err)
+	// SHEPHERD_HOME is set, so nothing may fall back to ~/.shepherd.
+	if _, err := os.Stat(filepath.Join(harness.userHome, ".shepherd")); !os.IsNotExist(err) {
+		t.Fatalf("shepherd created ~/.shepherd despite SHEPHERD_HOME being set: %v", err)
 	}
 
 	// The pilot documents itself into the home directory on first run.
-	for _, relative := range []string{"AGENTS.md", "CLAUDE.md", "skills/manage-heikou/SKILL.md", "state.json"} {
+	for _, relative := range []string{"AGENTS.md", "CLAUDE.md", "skills/manage-shepherd/SKILL.md", "state.json"} {
 		if _, err := os.Stat(filepath.Join(harness.home, relative)); err != nil {
-			t.Fatalf("expected %s in the heikou home: %v", relative, err)
+			t.Fatalf("expected %s in the shepherd home: %v", relative, err)
 		}
 	}
 }

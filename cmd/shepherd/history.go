@@ -8,18 +8,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zamborg/heikou/internal/format"
-	"github.com/zamborg/heikou/internal/transcript"
+	"github.com/ez-gz/shepherd/internal/format"
+	"github.com/ez-gz/shepherd/internal/transcript"
 )
 
 // runHistory answers "what happened in this session" from what the runner
-// recorded, which is the one question `h peek` cannot answer.
+// recorded, which is the one question `shepherd peek` cannot answer.
 //
 // The two verbs never merge. Peek is the pane's current frame; history is what
 // happened. A caller that conflates them will describe a screenshot as a
 // conversation, which is the mistake the pilot instructions exist to prevent.
 func (a *app) runHistory(args []string) error {
-	flags := a.newFlagSet("h history")
+	flags := a.newFlagSet("shepherd history")
 	socket := flags.String("socket", defaultSocket(), "private tmux socket name")
 	last := flags.Int("last", transcript.DefaultTurns, "how many recent turns to print; 0 for every turn")
 	jsonOutput := flags.Bool("json", false, "write a machine-readable result")
@@ -27,7 +27,7 @@ func (a *app) runHistory(args []string) error {
 		return err
 	}
 	if flags.NArg() != 1 {
-		return errors.New("usage: h history <session> [--last N] [--json]")
+		return errors.New("usage: shepherd history <session> [--last N] [--json]")
 	}
 	if *last < 0 {
 		return errors.New("--last cannot be negative")
@@ -92,7 +92,7 @@ func writeHistory(a *app, result transcript.Transcript) {
 	fmt.Fprintf(a.out, "%s · %s transcript · %s\n",
 		format.ShortID(result.SessionID), result.Runner, turnRange(result))
 	if result.Bounded {
-		fmt.Fprintf(a.out, "warning: the transcript is larger than Heikou reads, so these are its earliest turns, not its latest\n")
+		fmt.Fprintf(a.out, "warning: the transcript is larger than Shepherd reads, so these are its earliest turns, not its latest\n")
 	}
 	if result.SkippedRecords > 0 {
 		fmt.Fprintf(a.out, "warning: %s could not be read\n", pluralRecords(result.SkippedRecords))

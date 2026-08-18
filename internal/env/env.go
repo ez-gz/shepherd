@@ -1,21 +1,10 @@
-// Package env names every environment variable Heikou reads or sets.
-//
-// The names were previously declared wherever they happened to be needed:
-// HEIKOU_CLAUDE_BIN was a constant in internal/config, another constant in
-// internal/runner, and a string literal in internal/supervisor's list of
-// variables the tmux server must refresh. HEIKOU_STATE and HEIKOU_DATA were
-// declared in internal/workstream and written out again in internal/home's
-// migration table.
-//
-// Three copies of a name is not a style problem. It means the answer to "which
-// variables does Heikou honour" is assembled from five files, so a new variable
-// can be added to one surface and silently missed by the tmux refresh list —
-// which is how a stale credential leaks into a later session. It also means a
-// hermetic test cannot know what to blank without reading the source.
+// Package env names every environment variable Shepherd reads or sets. Keeping
+// them together lets configuration, runner launch, tmux refresh, and hermetic
+// tests share one contract instead of repeating security-sensitive strings.
 //
 // This package is a leaf: it imports nothing else in the module, so any layer
 // can name a variable without a dependency detour. An architecture test asserts
-// that no HEIKOU_ literal is written anywhere else in non-test source.
+// that no SHEPHERD_ literal is written anywhere else in non-test source.
 package env
 
 import (
@@ -24,29 +13,27 @@ import (
 )
 
 const (
-	// Home overrides the single directory holding every Heikou file. Setting it
-	// also suppresses the one-time migration off the pre-0.4 XDG layout: a
-	// caller that chose a location owns it.
-	Home = "HEIKOU_HOME"
+	// Home overrides the single directory holding every Shepherd file.
+	Home = "SHEPHERD_HOME"
 	// Config, State and Data override individual paths inside the home
-	// directory. They predate the consolidation and are still honoured.
-	Config = "HEIKOU_CONFIG"
-	State  = "HEIKOU_STATE"
-	Data   = "HEIKOU_DATA"
+	// directory for tests and custom layouts.
+	Config = "SHEPHERD_CONFIG"
+	State  = "SHEPHERD_STATE"
+	Data   = "SHEPHERD_DATA"
 
 	// TmuxSocket names the private tmux server. Tests rely on it to keep a run
 	// off the developer's own sessions.
-	TmuxSocket = "HEIKOU_TMUX_SOCKET"
+	TmuxSocket = "SHEPHERD_TMUX_SOCKET"
 
 	// DefaultRunner, CodexBinary and ClaudeBinary override settings that
 	// otherwise come from config.json.
-	DefaultRunner = "HEIKOU_DEFAULT_RUNNER"
-	CodexBinary   = "HEIKOU_CODEX_BIN"
-	ClaudeBinary  = "HEIKOU_CLAUDE_BIN"
+	DefaultRunner = "SHEPHERD_DEFAULT_RUNNER"
+	CodexBinary   = "SHEPHERD_CODEX_BIN"
+	ClaudeBinary  = "SHEPHERD_CLAUDE_BIN"
 
-	// SessionID is set by Heikou into an agent's environment rather than read
+	// SessionID is set by Shepherd into an agent's environment rather than read
 	// from the user, so a running agent can identify its own session.
-	SessionID = "HEIKOU_SESSION_ID"
+	SessionID = "SHEPHERD_SESSION_ID"
 
 	// SessionRunner, SessionState, SessionRoot and SessionTitle describe one
 	// session to a configured brief source. They are written outward only, into
@@ -56,20 +43,20 @@ const (
 	// describing, not what was said in it: the initial prompt and the messages
 	// are the user's content, and wanting a status line in a row is not a reason
 	// to hand what someone typed to another program on a timer.
-	SessionRunner = "HEIKOU_SESSION_RUNNER"
-	SessionState  = "HEIKOU_SESSION_STATE"
-	SessionRoot   = "HEIKOU_SESSION_ROOT"
-	SessionTitle  = "HEIKOU_SESSION_TITLE"
+	SessionRunner = "SHEPHERD_SESSION_RUNNER"
+	SessionState  = "SHEPHERD_SESSION_STATE"
+	SessionRoot   = "SHEPHERD_SESSION_ROOT"
+	SessionTitle  = "SHEPHERD_SESSION_TITLE"
 )
 
 // Names lists every variable above, so that a test can assert this file is the
-// only place in non-test source where a HEIKOU_ name is written, and a reader
-// can answer "which variables does Heikou honour" from one list.
+// only place in non-test source where a SHEPHERD_ name is written, and a reader
+// can answer "which variables does Shepherd honour" from one list.
 //
 // It is deliberately not the tmux server's environment-refresh list. Those are
 // different questions: that list is about which values must be re-read from an
 // attaching client, and answering it wholesale from here would refresh
-// HEIKOU_SESSION_ID, replacing a session's identity with the attacher's.
+// SHEPHERD_SESSION_ID, replacing a session's identity with the attacher's.
 var Names = []string{
 	Home, Config, State, Data,
 	TmuxSocket,

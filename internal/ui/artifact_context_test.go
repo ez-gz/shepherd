@@ -9,7 +9,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/zamborg/heikou/internal/workstream"
+	"github.com/ez-gz/shepherd/internal/workstream"
 )
 
 func TestArtifactContextBoundsNotesAndTree(t *testing.T) {

@@ -1,13 +1,13 @@
 # Session history
 
-Status: shipped for Claude as `h history`; Codex remains unsupported. Raised by
-a pilot during testing, which correctly reported that `h peek` shows only the
+Status: shipped for Claude as `shepherd history`; Codex remains unsupported. Raised by
+a pilot during testing, which correctly reported that `shepherd peek` shows only the
 current terminal frame and not what a session did.
 
 ## What shipped
 
 `internal/transcript` locates and parses the JSONL file Claude Code writes per
-session, and `h history SESSION [--last N] [--json]` projects it into turns.
+session, and `shepherd history SESSION [--last N] [--json]` projects it into turns.
 Every answer names its runner and reports `available`, `missing`, or
 `unsupported`, so a caller can tell an authoritative record from an absent one.
 A missing transcript exits zero.
@@ -50,21 +50,21 @@ Codex history. **The blocker named here has since been removed** — see
 [session-resume.md](session-resume.md). This document said Codex history needed
 "Codex to accept an externally supplied session id, or to report the id it
 chose". Codex reports the id it chose, in the `session_meta` record of its
-rollout, and Heikou now identifies and registers that id per session on a unique
+rollout, and Shepherd now identifies and registers that id per session on a unique
 launch-directory / time-window / verbatim-prompt match.
 
 So the identification problem is solved and only the parsing is left. Making
-`h history` work for Codex now means reading the rollout's `response_item`
+`shepherd history` work for Codex now means reading the rollout's `response_item`
 records — a different record vocabulary from Claude's, with its own ways to be
 wrong — and locating the file from the registered conversation id instead of
-scanning. Until someone does that, `h history` still says `unsupported` for
+scanning. Until someone does that, `shepherd history` still says `unsupported` for
 Codex, and the reason it gives is now out of date rather than wrong in kind.
 
 ## The problem
 
-`h peek` is honest but thin. A pilot asked "what happened in the OAuth session?"
+`shepherd peek` is honest but thin. A pilot asked "what happened in the OAuth session?"
 can answer with durable facts and one screenshot of the pane, and nothing else.
-That is the single most common question about a session, and Heikou currently
+That is the single most common question about a session, and Shepherd currently
 cannot answer it.
 
 The reason is measured and structural, not a missing feature flag. A
@@ -78,11 +78,11 @@ So history cannot come from tmux. It has to come from the runner.
 
 ## The source that already exists
 
-Heikou launches Claude as `claude --session-id <heikou-uuid>`, and Claude Code
+Shepherd launches Claude as `claude --session-id <shepherd-uuid>`, and Claude Code
 writes a JSONL transcript per session under `~/.claude/projects/`, in a
 directory named for the session's root with `/` and `.` replaced by `-`.
 
-Both halves of that are already true, unplanned: Heikou owns the id, and
+Both halves of that are already true, unplanned: Shepherd owns the id, and
 records `InitialRoot`. So a Claude session's transcript is locatable today from
 data already in `state.json`.
 
@@ -92,11 +92,11 @@ Codex needs its own investigation. Do not assume symmetry.
 
 A read-only observer, not a new runtime concern.
 
-- `h history SESSION [--json] [--last N]` returns turns, not raw terminal text.
+- `shepherd history SESSION [--json] [--last N]` returns turns, not raw terminal text.
 - It is **optional and fails soft**. A missing transcript is a normal answer —
   "no transcript for this session" — not an error, because the file layout
   belongs to Claude and may change.
-- It never merges with `h peek`. Peek is the current frame; history is what
+- It never merges with `shepherd peek`. Peek is the current frame; history is what
   happened. Conflating them is exactly the mistake the pilot instructions warn
   against.
 - The projection must say which runner supplied it, so a caller can tell an
@@ -104,7 +104,7 @@ A read-only observer, not a new runtime concern.
 
 ## Why this is worth more than it looks
 
-This is the first authoritative, structured runner signal Heikou would have.
+This is the first authoritative, structured runner signal Shepherd would have.
 [session-status-titles.md](session-status-titles.md) blocks semantic agent
 status on exactly that: step 3 is "probe authoritative Claude and Codex
 signals." A transcript reader is that probe, arrived at from a different
@@ -119,11 +119,11 @@ the honest-status work concrete rather than theoretical.
 
 - Do not scrape the terminal to reconstruct history. That is the heuristic this
   codebase has consistently refused.
-- Do not persist a copy of the transcript into Heikou state. It is the runner's
+- Do not persist a copy of the transcript into Shepherd state. It is the runner's
   data; read it where it lives.
 - Do not present a transcript as proof a session is healthy, finished, or idle.
   It is a record of the past, and the runtime state enum remains the only claim
-  Heikou makes about now.
+  Shepherd makes about now.
 
 ## First step
 

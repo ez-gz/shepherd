@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zamborg/heikou/internal/heikou"
+	"github.com/ez-gz/shepherd/internal/shepherd"
 )
 
 const testSessionID = "11111111-2222-4333-8444-555555555555"
@@ -70,7 +70,7 @@ func read(t *testing.T, projects string, request Request) Transcript {
 		request.SessionID = testSessionID
 	}
 	if request.Runner == "" {
-		request.Runner = heikou.BackendClaude
+		request.Runner = shepherd.BackendClaude
 	}
 	result, err := Reader{ClaudeProjects: projects}.Read(request)
 	if err != nil {
@@ -274,7 +274,7 @@ func TestZeroLastUsesTheDefaultAndNegativeReturnsEverything(t *testing.T) {
 // The session id is the authority, not the directory name. Claude owns the
 // slug rules, so a directory this code cannot predict must still be found.
 func TestTranscriptIsFoundWhenTheDirectoryNameIsUnpredictable(t *testing.T) {
-	projects := writeTranscript(t, "an-encoding-heikou-does-not-model", userRecord(t, "found me"))
+	projects := writeTranscript(t, "an-encoding-shepherd-does-not-model", userRecord(t, "found me"))
 
 	result := read(t, projects, Request{Root: "/somewhere/else", Last: -1})
 	if result.Availability != Available {
@@ -286,9 +286,9 @@ func TestTranscriptIsFoundWhenTheDirectoryNameIsUnpredictable(t *testing.T) {
 }
 
 func TestSlugLocatesTheTranscriptWithoutScanning(t *testing.T) {
-	root := "/Users/z/Documents/ez-gz/heikou/.claude/worktrees/one"
+	root := "/Users/z/Documents/ez-gz/shepherd/.claude/worktrees/one"
 	slug := claudeProjectSlug(root)
-	if slug != "-Users-z-Documents-ez-gz-heikou--claude-worktrees-one" {
+	if slug != "-Users-z-Documents-ez-gz-shepherd--claude-worktrees-one" {
 		t.Fatalf("slug = %q, want the separators and dots replaced", slug)
 	}
 	projects := writeTranscript(t, slug, userRecord(t, "fast path"))
@@ -319,10 +319,10 @@ func TestAbsentProjectsDirectoryIsMissingRatherThanAnError(t *testing.T) {
 	}
 }
 
-// Codex writes rollout files but mints its own session id, so Heikou cannot say
+// Codex writes rollout files but mints its own session id, so Shepherd cannot say
 // which one belongs to this session. That is a different answer from "missing".
 func TestCodexReportsUnsupportedRatherThanMissing(t *testing.T) {
-	result := read(t, t.TempDir(), Request{Runner: heikou.BackendCodex, Root: "/work"})
+	result := read(t, t.TempDir(), Request{Runner: shepherd.BackendCodex, Root: "/work"})
 	if result.Availability != Unsupported {
 		t.Fatalf("availability = %q, want %q", result.Availability, Unsupported)
 	}
@@ -332,14 +332,14 @@ func TestCodexReportsUnsupportedRatherThanMissing(t *testing.T) {
 }
 
 func TestNoAgentReportsUnsupported(t *testing.T) {
-	result := read(t, t.TempDir(), Request{Runner: heikou.BackendNoAgent, Root: "/work"})
+	result := read(t, t.TempDir(), Request{Runner: shepherd.BackendNoAgent, Root: "/work"})
 	if result.Availability != Unsupported {
 		t.Fatalf("availability = %q, want %q", result.Availability, Unsupported)
 	}
 }
 
 func TestEveryAnswerNamesItsRunner(t *testing.T) {
-	for _, runner := range []heikou.Backend{heikou.BackendClaude, heikou.BackendCodex, heikou.BackendNoAgent} {
+	for _, runner := range []shepherd.Backend{shepherd.BackendClaude, shepherd.BackendCodex, shepherd.BackendNoAgent} {
 		result := read(t, t.TempDir(), Request{Runner: runner, Root: "/work"})
 		if result.Runner != runner {
 			t.Fatalf("runner = %q, want %q so a caller can tell what supplied the answer", result.Runner, runner)
@@ -465,7 +465,7 @@ func TestOrdinaryMessagesAreNotMistakenForCommands(t *testing.T) {
 
 func TestAnEmptySessionIDIsRejected(t *testing.T) {
 	_, err := Reader{ClaudeProjects: t.TempDir()}.Read(Request{
-		Runner: heikou.BackendClaude, SessionID: "  ", Root: "/work",
+		Runner: shepherd.BackendClaude, SessionID: "  ", Root: "/work",
 	})
 	if err == nil {
 		t.Fatal("an empty session id must be an error, not a scan of every project")
