@@ -376,6 +376,30 @@ func TestEnsureCreatesPrivateEditableJSON(t *testing.T) {
 	}
 }
 
+func TestAutomaticTitleIsDefaultOffAndExplicitlyOptIn(t *testing.T) {
+	clearSettingsEnvironment(t)
+	missing := filepath.Join(t.TempDir(), "missing.json")
+	settings, err := (Store{Path: missing}).Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.AutomaticTitle {
+		t.Fatal("automatic titles defaulted on")
+	}
+
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"automatic_title":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings, err = (Store{Path: path}).Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !settings.AutomaticTitle {
+		t.Fatal("explicit automatic_title opt-in was ignored")
+	}
+}
+
 func clearSettingsEnvironment(t *testing.T) {
 	t.Helper()
 	for _, name := range []string{env.DefaultRunner, env.CodexBinary, env.ClaudeBinary} {
@@ -399,7 +423,7 @@ func TestBriefDefaultsWhenUnmentioned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(brief.Lead, ",") != "title,prompt,runner" || strings.Join(brief.Detail, ",") != "activity,latest,prompt" {
+	if strings.Join(brief.Lead, ",") != "title,automatic-title,prompt,runner" || strings.Join(brief.Detail, ",") != "status,activity,latest,prompt" {
 		t.Fatalf("brief defaults = %#v", brief)
 	}
 	if len(brief.Sources) != 0 {
@@ -414,7 +438,7 @@ func TestBriefEmptyDetailDiffersFromAnOmittedOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(omitted.Detail, ",") != "activity,latest,prompt" {
+	if strings.Join(omitted.Detail, ",") != "status,activity,latest,prompt" {
 		t.Fatalf("omitted detail did not inherit its default: %#v", omitted.Detail)
 	}
 	explicit, err := loadBrief(t, `{"brief":{"lead":["title"],"detail":[]}}`)
@@ -475,13 +499,13 @@ func TestBriefUnknownSourceErrorListsTheBuiltins(t *testing.T) {
 func TestBriefAcceptsACommandSource(t *testing.T) {
 	brief, err := loadBrief(t, `{"brief":{
 		"lead":["title","prompt","runner"],
-		"detail":["status","latest"],
-		"sources":{"status":{"command":["agent-status","--porcelain"],"interval_seconds":5,"timeout_seconds":2}}
+		"detail":["agent-status","latest"],
+		"sources":{"agent-status":{"command":["agent-status","--porcelain"],"interval_seconds":5,"timeout_seconds":2}}
 	}}`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	source, ok := brief.Sources["status"]
+	source, ok := brief.Sources["agent-status"]
 	if !ok {
 		t.Fatalf("sources = %#v", brief.Sources)
 	}
@@ -494,11 +518,11 @@ func TestBriefAcceptsACommandSource(t *testing.T) {
 }
 
 func TestBriefCommandSourceBoundsDefaultWhenOmitted(t *testing.T) {
-	brief, err := loadBrief(t, `{"brief":{"detail":["status"],"sources":{"status":{"command":["agent-status"]}}}}`)
+	brief, err := loadBrief(t, `{"brief":{"detail":["agent-status"],"sources":{"agent-status":{"command":["agent-status"]}}}}`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if source := brief.Sources["status"]; source.IntervalSeconds != 10 || source.TimeoutSeconds != 3 {
+	if source := brief.Sources["agent-status"]; source.IntervalSeconds != 10 || source.TimeoutSeconds != 3 {
 		t.Fatalf("defaulted bounds = %#v", source)
 	}
 }

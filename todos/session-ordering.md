@@ -1,43 +1,34 @@
 # Session ordering within a workstream
 
-Status: proposed; deferred out of the dashboard consolidation PR.
+Status: included in 0.8.0.
 
-## The idea
+## Contract
 
-`Shift-↑` / `Shift-↓` reorders a named workstream today, and that ordering is
-durable. The obvious symmetry is for the same chord on a session row to reorder
-that session inside its workstream, so the rows you care about sit at the top of
-their group.
+`Shift-Up` / `Shift-Down` on a named workstream reorders that workstream.
+The same chord on a member session reorders the session inside its current
+named workstream. A reorder never changes membership; `Ctrl-T` remains the
+explicit dashboard move/adopt flow.
 
-## Why it is not in the consolidation PR
+The CLI equivalent is:
 
-There is no durable session order to change. `Membership` is
-`{WorkstreamID, SessionID, JoinedAt}` and `State.Sessions` is a flat list, so
-the grouped projection in `overviewModel.sessionsByWorkstream` emits members in
-whatever order `snapshot.Sessions` arrived in. Reordering has nothing to write.
+```sh
+shepherd reorder SESSION --up|--down
+```
 
-The consolidation PR is a renderer and keymap change that deliberately leaves
-the domain untouched. Adding a durable order field is a state-schema change with
-a migration, so it does not belong in the same slice.
+Ungrouped sessions have no membership and no durable position. They keep the
+existing live-first, newest-first projection. A session newly launched,
+adopted, or moved into a named workstream appends to the bottom.
 
-Instead, `Shift-↑` / `Shift-↓` on a session row moves it to the previous or next
-workstream, which is plain `MoveSession` and needs nothing new.
+## Durable shape
 
-## What it would take
+State schema v4 adds a dense, zero-based `Position` to `Membership`. Positions
+are unique within a workstream. Boundary reorders are no-ops and do not advance
+the state revision; successful reorders atomically swap neighboring positions.
+Moving or deleting a member compacts its source workstream, and moving into a
+workstream appends after its last member.
 
-1. An explicit order on membership — either a `Position int` on `Membership` or
-   an ordered `SessionIDs []string` per workstream. Position on the membership
-   is closer to the existing shape and keeps ungrouped sessions representable.
-2. A state version bump and a migration that assigns initial positions from
-   `JoinedAt`, so existing installations keep their current visible order.
-3. A `ReorderSessionAction` on the command plane with the same validation and
-   revision discipline as `ReorderWorkstreamAction`, plus an `shepherd` verb for it so
-   the CLI surface stays complete.
-4. A tie-break rule for sessions that arrive while a reorder is in flight.
-
-## Open question
-
-Whether manual ordering is the right primitive at all. Sorting by recency or by
-live-first may serve the underlying want — "the rows I care about sit at the
-top" — without any durable state, and without a migration. Decide that before
-building the schema change.
+The v3-to-v4 migration orders existing members newest-created first, matching
+the old projection's durable fallback. `JoinedAt` and legacy membership order
+are deterministic tie-breakers. Runtime liveness is ephemeral and is never
+written into the migration. The migration itself does not manufacture a domain
+revision.

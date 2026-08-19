@@ -31,6 +31,73 @@ func requireTmux(t *testing.T) string {
 	return ""
 }
 
+func TestBootstrapInstallsCopyFirstMouseContract(t *testing.T) {
+	tmuxBinary := requireTmux(t)
+	token, err := randomToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := &Tmux{
+		binary: tmuxBinary, socket: fmt.Sprintf("shepherd-mouse-test-%d-%s", os.Getpid(), token),
+		executable: "/path/that/must/not/run",
+	}
+	t.Cleanup(func() { cleanupTestTmux(manager) })
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := manager.Bootstrap(ctx); err != nil {
+		t.Fatal(err)
+	}
+	assertTmuxValue := func(args []string, want string) {
+		t.Helper()
+		output, runErr := manager.run(ctx, nil, args...)
+		if runErr != nil || strings.TrimSpace(string(output)) != want {
+			t.Fatalf("tmux %v = %q, err=%v, want %q", args, output, runErr, want)
+		}
+	}
+	assertTmuxValue([]string{"show-options", "-gv", "mouse"}, "on")
+	assertTmuxValue([]string{"show-options", "-gv", "set-clipboard"}, "on")
+	assertTmuxValue([]string{"show-options", "-sv", "@shepherd_bootstrap_version"}, bootstrapVersion)
+
+	rootBinding, err := manager.keyBinding(ctx, "root", "MouseDrag1Pane")
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding := strings.TrimSpace(rootBinding)
+	if !strings.Contains(binding, "copy-mode -M") || strings.Contains(binding, "mouse_any_flag") || strings.Contains(binding, "send-keys -M") {
+		t.Fatalf("MouseDrag1Pane retained provider-dependent routing: %q", binding)
+	}
+	for _, table := range []string{"copy-mode", "copy-mode-vi"} {
+		output, runErr := manager.keyBinding(ctx, table, "MouseDragEnd1Pane")
+		if runErr != nil || !strings.Contains(output, "copy-pipe-and-cancel") {
+			t.Fatalf("%s drag end = %q, err=%v", table, output, runErr)
+		}
+		for key, command := range map[string]string{
+			"Space": "begin-selection",
+			"Enter": "copy-pipe-and-cancel",
+		} {
+			output, runErr = manager.keyBinding(ctx, table, key)
+			if runErr != nil || !strings.Contains(output, command) {
+				t.Fatalf("%s %s = %q, err=%v, want %s", table, key, output, runErr, command)
+			}
+		}
+	}
+	if command := systemClipboardCommand(); command != "" {
+		assertTmuxValue([]string{"show-options", "-sv", "copy-command"}, command)
+	}
+	health, err := manager.Inspect(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !health.ServerRunning || health.Bootstrap != ExpectedBootstrapVersion() || health.Mouse != "on" ||
+		!strings.Contains(health.DragBinding, "copy-mode") || !strings.Contains(health.CopyBinding, "copy-pipe-and-cancel") {
+		t.Fatalf("bootstrap health = %#v", health)
+	}
+	if command := systemClipboardCommand(); command != "" && health.CopyCommand != command {
+		t.Fatalf("copy command = %q, want %q", health.CopyCommand, command)
+	}
+}
+
 func TestTmuxLifecycleAndLiteralMessageDelivery(t *testing.T) {
 	tmuxBinary := requireTmux(t)
 	versionOutput, err := exec.Command(tmuxBinary, "-V").Output()
@@ -236,8 +303,15 @@ func TestRuntimeExistsFindsPaneWithMalformedProjectionMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sessions) != 0 {
-		t.Fatalf("malformed pane unexpectedly remained projectable: %#v", sessions)
+	if len(sessions) != 1 || !sessions[0].Degraded() || sessions[0].ID != id {
+		t.Fatalf("malformed pane was not preserved as a degraded observation: %#v", sessions)
+	}
+	health, err := manager.Inspect(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(health.DegradedPanes) != 1 || health.DegradedPanes[0].ID != id || health.DegradedPanes[0].Reason == "" {
+		t.Fatalf("degraded health = %#v", health.DegradedPanes)
 	}
 	exists, err := manager.RuntimeExists(ctx, id, session.Name)
 	if err != nil {

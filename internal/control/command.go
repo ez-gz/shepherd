@@ -67,6 +67,16 @@ type ResumeSessionAction struct {
 
 func (ResumeSessionAction) commandAction() {}
 
+// ForkSessionAction explicitly branches a Codex conversation. Resume retains
+// one writer for the original conversation; fork is the separate verb for a
+// new native identity with copied history.
+type ForkSessionAction struct {
+	SessionID string
+	Prompt    string
+}
+
+func (ForkSessionAction) commandAction() {}
+
 // RegisterConversationAction asks Shepherd to learn the conversation id a runner
 // minted for a session it could not name at launch.
 //
@@ -117,6 +127,13 @@ func (RenameWorkstreamAction) commandAction() {}
 type ReorderWorkstreamAction struct{ Delta int }
 
 func (ReorderWorkstreamAction) commandAction() {}
+
+type ReorderSessionAction struct {
+	SessionID string
+	Delta     int
+}
+
+func (ReorderSessionAction) commandAction() {}
 
 type ArchiveWorkstreamAction struct{}
 
@@ -282,16 +299,22 @@ func validateActionScope(command Command) error {
 	switch action := command.Action.(type) {
 	// A resume is a start: either scope is meaningful, because the scope names
 	// where the new session lands.
-	case StartAction, ResumeSessionAction:
-		return nil
-	case SendAction, StopAction, DeleteSessionAction, SetSessionTitleAction,
+	case StartAction:
+		return shepherd.ValidateInteractivePayload("prompt", action.Prompt)
+	case ResumeSessionAction:
+		return shepherd.ValidateInteractivePayload("prompt", action.Prompt)
+	case ForkSessionAction:
+		return shepherd.ValidateInteractivePayload("prompt", action.Prompt)
+	case SendAction:
+		return shepherd.ValidateInteractivePayload("message", action.Message)
+	case StopAction, DeleteSessionAction, SetSessionTitleAction,
 		RegisterConversationAction:
 		return nil
 	case CreateWorkstreamAction:
 		if command.Scope.Kind != ScopeInstallation {
 			return errors.New("create workstream requires installation scope")
 		}
-	case RenameWorkstreamAction, ReorderWorkstreamAction, ArchiveWorkstreamAction,
+	case RenameWorkstreamAction, ReorderWorkstreamAction, ReorderSessionAction, ArchiveWorkstreamAction,
 		AddRootAction, ReplaceRootAction, RemoveRootAction:
 		return requireWorkstream()
 	case MoveSessionAction:

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -25,11 +26,14 @@ import (
 )
 
 const (
-	DefaultSocket = "shepherd"
+	DefaultSocket       = "shepherd"
+	nativeStateOption   = "@shepherd_native_state"
+	nativeMetricsOption = "@shepherd_native_metrics"
+	codexTitleMarker    = "@shepherd_codex_title"
 	// bootstrapVersion is the marker that lets a long-lived server skip
 	// reconfiguration. Bump it whenever the option set changes, or servers
 	// already running keep the configuration they were started with.
-	bootstrapVersion = "2"
+	bootstrapVersion = "3"
 	framingAttempts  = 3
 )
 
@@ -37,6 +41,25 @@ type Tmux struct {
 	binary     string
 	socket     string
 	executable string
+}
+
+// TmuxHealth is a read-only snapshot of the private server configuration that
+// affects session discovery and reliable copy/selection behavior.
+type TmuxHealth struct {
+	ServerRunning bool
+	Bootstrap     string
+	Mouse         string
+	SetClipboard  string
+	CopyCommand   string
+	DragBinding   string
+	CopyBinding   string
+	SessionCount  int
+	DegradedPanes []DegradedPane
+}
+
+type DegradedPane struct {
+	ID     string
+	Reason string
 }
 
 func New(socket string) (*Tmux, error) {
@@ -54,7 +77,50 @@ func New(socket string) (*Tmux, error) {
 	return &Tmux{binary: binary, socket: socket, executable: executable}, nil
 }
 
-func (t *Tmux) Socket() string { return t.socket }
+func (t *Tmux) Socket() string         { return t.socket }
+func ExpectedBootstrapVersion() string { return bootstrapVersion }
+
+// Inspect reports a running server without bootstrapping or rewriting it. A
+// missing server is healthy idle state: Shepherd starts it on first launch.
+func (t *Tmux) Inspect(ctx context.Context) (TmuxHealth, error) {
+	health := TmuxHealth{}
+	if _, err := t.run(ctx, nil, "list-sessions", "-F", "#{session_name}"); err != nil {
+		if isMissingServer(err) {
+			return health, nil
+		}
+		if !strings.Contains(err.Error(), "no sessions") {
+			return health, fmt.Errorf("inspect tmux socket: %w", err)
+		}
+	}
+	health.ServerRunning = true
+	read := func(args ...string) string {
+		output, _ := t.run(ctx, nil, args...)
+		return format.OneLine(string(output))
+	}
+	readKey := func(table, key string) string {
+		binding, _ := t.keyBinding(ctx, table, key)
+		return format.OneLine(binding)
+	}
+	health.Bootstrap = read("show-options", "-sv", "@shepherd_bootstrap_version")
+	health.Mouse = read("show-options", "-gv", "mouse")
+	health.SetClipboard = read("show-options", "-gv", "set-clipboard")
+	health.CopyCommand = read("show-options", "-sv", "copy-command")
+	health.DragBinding = readKey("root", "MouseDrag1Pane")
+	health.CopyBinding = readKey("copy-mode", "MouseDragEnd1Pane")
+	sessions, err := t.Sessions(ctx)
+	if err != nil {
+		return health, err
+	}
+	health.SessionCount = len(sessions)
+	for _, session := range sessions {
+		if session.Degraded() {
+			health.DegradedPanes = append(health.DegradedPanes, DegradedPane{
+				ID: session.ID, Reason: session.ObservationError,
+			})
+		}
+	}
+	return health, nil
+}
 
 // Bootstrap creates a configuration-isolated tmux server and sets global pane
 // defaults before any runner can start. In particular, remain-on-exit must be
@@ -100,15 +166,51 @@ func (t *Tmux) Bootstrap(ctx context.Context) error {
 		// terminal for. The inner half, what tmux then offers a pane, is set
 		// after this batch.
 		{"set-option", "-as", "terminal-features", ",xterm*:extkeys"},
+		// A drag means selection in every attached runner. tmux's default
+		// MouseDrag1Pane binding forwards the drag when the foreground program
+		// requested mouse events, which makes the same gesture runner-dependent.
+		// Starting copy mode unconditionally on the first drag event keeps plain
+		// clicks and wheel events available to the runner while giving selection
+		// one owner. The copy-mode bindings are named explicitly rather than left
+		// to tmux defaults so upgrades cannot silently change the contract.
+		{"bind-key", "-T", "root", "MouseDrag1Pane", "copy-mode", "-M"},
+		{"bind-key", "-T", "copy-mode", "MouseDragEnd1Pane", "send-keys", "-X", "copy-pipe-and-cancel"},
+		{"bind-key", "-T", "copy-mode-vi", "MouseDragEnd1Pane", "send-keys", "-X", "copy-pipe-and-cancel"},
+		// Keyboard selection is the same in both tmux mode-key tables. Without
+		// these bindings emacs mode uses Space for page-down and Meta-W to copy,
+		// while vi mode uses Space and Enter, making the fallback depend on an
+		// otherwise invisible server option.
+		{"bind-key", "-T", "copy-mode", "Space", "send-keys", "-X", "begin-selection"},
+		{"bind-key", "-T", "copy-mode", "Enter", "send-keys", "-X", "copy-pipe-and-cancel"},
+		{"bind-key", "-T", "copy-mode-vi", "Space", "send-keys", "-X", "begin-selection"},
+		{"bind-key", "-T", "copy-mode-vi", "Enter", "send-keys", "-X", "copy-pipe-and-cancel"},
 		{"bind-key", "-n", "C-\\", "detach-client"},
-		{"set-option", "-s", "@shepherd_bootstrap_version", bootstrapVersion},
 	}
+	// set-clipboard still supplies the portable OSC 52 path and keeps the tmux
+	// paste buffer populated. On macOS, copy-command also gives copy-mode a
+	// direct system-clipboard path, so a terminal that blocks OSC 52 does not
+	// make a successful selection look broken.
+	if command := systemClipboardCommand(); command != "" {
+		commands = append(commands, []string{"set-option", "-s", "copy-command", command})
+	}
+	commands = append(commands, []string{"set-option", "-s", "@shepherd_bootstrap_version", bootstrapVersion})
 	args := joinTmuxCommands(commands)
 	if _, err := t.run(ctx, nil, args...); err != nil {
 		return fmt.Errorf("configure tmux server: %w", err)
 	}
 	t.configureKeyReporting(ctx)
 	return nil
+}
+
+func systemClipboardCommand() string {
+	if runtime.GOOS != "darwin" {
+		return ""
+	}
+	const pbcopy = "/usr/bin/pbcopy"
+	if info, err := os.Stat(pbcopy); err == nil && !info.IsDir() {
+		return pbcopy
+	}
+	return ""
 }
 
 // configureKeyReporting decides how tmux encodes a modified key for the pane,
@@ -157,6 +259,10 @@ func (t *Tmux) Sessions(ctx context.Context) ([]shepherd.Session, error) {
 		"#{pane_in_mode}",
 		"#{pane_input_off}",
 		"#{@shepherd_last_user_message}",
+		"#{@shepherd_native_state}",
+		"#{@shepherd_native_metrics}",
+		"#{@shepherd_codex_title}",
+		"#{pane_title}",
 	}
 
 	rows, err := t.listPaneFields(ctx, formatFields)
@@ -169,19 +275,7 @@ func (t *Tmux) Sessions(ctx context.Context) ([]shepherd.Session, error) {
 
 	var sessions []shepherd.Session
 	for _, fields := range rows {
-		if fields[2] == "" && strings.HasPrefix(fields[0], "shepherd-") {
-			candidate := strings.TrimPrefix(fields[0], "shepherd-")
-			if validSessionID(candidate) {
-				fields[2] = candidate
-			}
-		}
-		// @shepherd_pane is the V0 marker. New sessions receive a pane-scoped
-		// canonical marker in the same tmux command queue that creates them.
-		if fields[2] == "" || (fields[3] != fields[1] && fields[4] != "1") {
-			continue
-		}
-		session, parseErr := parseSession(fields)
-		if parseErr == nil {
+		if session, marked := projectPane(fields); marked {
 			sessions = append(sessions, session)
 		}
 	}
@@ -193,6 +287,34 @@ func (t *Tmux) Sessions(ctx context.Context) ([]shepherd.Session, error) {
 		return sessions[i].StartedAt.After(sessions[j].StartedAt)
 	})
 	return sessions, nil
+}
+
+func projectPane(fields []string) (shepherd.Session, bool) {
+	if len(fields) < 5 {
+		return shepherd.Session{}, false
+	}
+	if fields[2] == "" && strings.HasPrefix(fields[0], "shepherd-") {
+		candidate := strings.TrimPrefix(fields[0], "shepherd-")
+		if validSessionID(candidate) {
+			fields[2] = candidate
+		}
+	}
+	// @shepherd_pane is the V0 marker. New sessions receive a pane-scoped
+	// canonical marker in the same tmux command queue that creates them. The
+	// marker itself is enough to keep a partially-written pane visible; when its
+	// ID is absent, its unique tmux session name is the degraded lookup key.
+	if fields[3] != fields[1] && fields[4] != "1" {
+		return shepherd.Session{}, false
+	}
+	if fields[2] == "" {
+		fields[2] = fields[0]
+		return degradedSession(fields, errors.New("missing Shepherd session id metadata")), true
+	}
+	session, err := parseSession(fields)
+	if err != nil {
+		return degradedSession(fields, err), true
+	}
+	return session, true
 }
 
 func (t *Tmux) Find(ctx context.Context, query string) (shepherd.Session, error) {
@@ -329,6 +451,9 @@ func (t *Tmux) Start(ctx context.Context, request shepherd.StartRequest) (shephe
 	if strings.TrimSpace(request.Prompt) == "" {
 		return shepherd.Session{}, errors.New("prompt cannot be empty")
 	}
+	if err := shepherd.ValidateInteractivePayload("prompt", request.Prompt); err != nil {
+		return shepherd.Session{}, err
+	}
 	if _, err := shepherd.ParseBackend(string(request.Backend)); err != nil {
 		return shepherd.Session{}, err
 	}
@@ -373,7 +498,7 @@ func (t *Tmux) Start(ctx context.Context, request shepherd.StartRequest) (shephe
 		newSession = append(newSession,
 			t.executable, "__agent", string(request.Backend),
 			runner.Encode(request.Prompt), runner.Encode(title), encodedCommand,
-			runner.Encode(request.Resume),
+			runner.Encode(request.Resume), forkArgument(request.Fork),
 		)
 	}
 	commands := [][]string{
@@ -384,6 +509,15 @@ func (t *Tmux) Start(ctx context.Context, request shepherd.StartRequest) (shephe
 		{"set-option", "-t", name, "@shepherd_started", strconv.FormatInt(started.Unix(), 10)},
 		{"set-option", "-t", name, "@shepherd_prompt", runner.Encode(request.Prompt)},
 		{"set-option", "-t", name, "@shepherd_root", runner.Encode(root)},
+	}
+	if request.Backend == shepherd.BackendCodex {
+		// Clear tmux's default title before marking the pane. From this point on,
+		// pane_title is accepted as native status because this launch installed
+		// Codex's terminal-title contract. Older panes have no marker.
+		commands = append(commands,
+			[]string{"select-pane", "-t", name + ":0.0", "-T", ""},
+			[]string{"set-option", "-p", "-t", name + ":0.0", codexTitleMarker, "1"},
+		)
 	}
 	output, err := t.run(ctx, nil, joinTmuxCommands(commands)...)
 	if err != nil {
@@ -407,9 +541,19 @@ func (t *Tmux) Start(ctx context.Context, request shepherd.StartRequest) (shephe
 	}, nil
 }
 
+func forkArgument(fork bool) string {
+	if fork {
+		return "1"
+	}
+	return "0"
+}
+
 func (t *Tmux) Send(ctx context.Context, session shepherd.Session, message string) error {
 	if strings.TrimSpace(message) == "" {
 		return errors.New("message cannot be empty")
+	}
+	if err := shepherd.ValidateInteractivePayload("message", message); err != nil {
+		return err
 	}
 	current, err := t.Find(ctx, session.ID)
 	if err != nil {
@@ -417,6 +561,10 @@ func (t *Tmux) Send(ctx context.Context, session shepherd.Session, message strin
 	}
 	if !current.Alive() {
 		return fmt.Errorf("session %s has exited", format.ShortID(current.ID))
+	}
+	if current.Degraded() {
+		return fmt.Errorf("session %s metadata is degraded: %s; attach or stop it instead of injecting input",
+			format.ShortID(current.ID), current.ObservationError)
 	}
 	if current.PaneInMode {
 		return fmt.Errorf("session %s is in a tmux mode; attach and leave that mode before sending", format.ShortID(current.ID))
@@ -508,7 +656,47 @@ func (t *Tmux) run(ctx context.Context, input []byte, args ...string) ([]byte, e
 	return stdout.Bytes(), nil
 }
 
+// keyBinding reads a single binding without asking tmux to filter to one key.
+// tmux 3.7 sends a one-result list-keys query to the target client's status
+// line instead of stdout, even for a command running without a client. Listing
+// the table and selecting its structured -T <table> <key> prefix works from the
+// minimum supported tmux 3.3 onward and keeps doctor output version-neutral.
+func (t *Tmux) keyBinding(ctx context.Context, table, key string) (string, error) {
+	output, err := t.run(ctx, nil, "list-keys", "-T", table)
+	if err != nil {
+		return "", err
+	}
+	if binding, ok := findTmuxKeyBinding(string(output), table, key); ok {
+		return binding, nil
+	}
+	return "", fmt.Errorf("tmux key %s is not bound in table %s", key, table)
+}
+
+func findTmuxKeyBinding(output, table, key string) (string, bool) {
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Fields(line)
+		for index := 0; index+2 < len(fields); index++ {
+			if fields[index] == "-T" && fields[index+1] == table && fields[index+2] == key {
+				return strings.TrimSpace(line), true
+			}
+		}
+	}
+	return "", false
+}
+
 func parseSession(fields []string) (shepherd.Session, error) {
+	if len(fields) < 19 {
+		return shepherd.Session{}, fmt.Errorf("tmux session has %d fields, want at least 19", len(fields))
+	}
+	// The final four fields are optional presentation metadata added after the
+	// lifecycle projection. Treat an absent value as empty so fixtures and any
+	// transitional caller cannot turn a missing status into a lost runtime.
+	for len(fields) < 23 {
+		fields = append(fields, "")
+	}
+	if fields[0] == "" || !validPaneID(fields[1]) || !validSessionID(fields[2]) {
+		return shepherd.Session{}, errors.New("invalid Shepherd runtime identity metadata")
+	}
 	backend, err := shepherd.ParseBackend(fields[5])
 	if err != nil {
 		return shepherd.Session{}, err
@@ -516,6 +704,9 @@ func parseSession(fields []string) (shepherd.Session, error) {
 	startedUnix, err := strconv.ParseInt(fields[6], 10, 64)
 	if err != nil {
 		return shepherd.Session{}, err
+	}
+	if startedUnix <= 0 {
+		return shepherd.Session{}, fmt.Errorf("invalid session start time %q", fields[6])
 	}
 	prompt, err := decodeMetadata(fields[7])
 	if err != nil {
@@ -525,9 +716,13 @@ func parseSession(fields []string) (shepherd.Session, error) {
 	if err != nil {
 		return shepherd.Session{}, err
 	}
+	if strings.TrimSpace(prompt) == "" || strings.TrimSpace(root) == "" {
+		return shepherd.Session{}, errors.New("missing Shepherd prompt or root metadata")
+	}
 	// This option is optional presentation metadata. A malformed value must not
 	// hide an otherwise valid runtime from discovery.
 	lastUserMessage, _ := decodeMetadata(fields[18])
+	nativeStatus := parseNativeStatus(backend, fields[19], fields[20], fields[21], fields[22])
 	deadUnix, _ := strconv.ParseInt(fields[11], 10, 64)
 	activityUnix, _ := strconv.ParseInt(fields[12], 10, 64)
 	attached, _ := strconv.Atoi(fields[15])
@@ -550,13 +745,123 @@ func parseSession(fields []string) (shepherd.Session, error) {
 	}
 	return shepherd.Session{
 		Name: fields[0], PaneID: fields[1], ID: fields[2], Backend: backend,
-		Prompt: prompt, LastUserMessage: lastUserMessage, Root: root, Status: status,
+		Prompt: prompt, LastUserMessage: lastUserMessage, NativeStatus: nativeStatus,
+		Root: root, Status: status,
 		StartedAt: time.Unix(startedUnix, 0), EndedAt: unixTime(deadUnix),
 		LastActivityAt: unixTime(activityUnix), ExitCode: exitCode,
 		CurrentPath: fields[13], CurrentCommand: fields[14],
 		AttachedClients: attached, PaneInMode: paneModeCount != 0,
 		InputDisabled: fields[17] == "1",
 	}, nil
+}
+
+// degradedSession preserves the process truth that tmux can still prove when
+// required Shepherd metadata is malformed. It intentionally does not guess at
+// backend, prompt, root, or exit code values that failed strict parsing.
+func degradedSession(fields []string, cause error) shepherd.Session {
+	for len(fields) < 23 {
+		fields = append(fields, "")
+	}
+	backend, _ := shepherd.ParseBackend(fields[5])
+	startedUnix, _ := strconv.ParseInt(fields[6], 10, 64)
+	prompt, _ := decodeMetadata(fields[7])
+	root, _ := decodeMetadata(fields[8])
+	lastUserMessage, _ := decodeMetadata(fields[18])
+	deadUnix, _ := strconv.ParseInt(fields[11], 10, 64)
+	activityUnix, _ := strconv.ParseInt(fields[12], 10, 64)
+	attached, _ := strconv.Atoi(fields[15])
+	paneModeCount, _ := strconv.Atoi(fields[16])
+
+	status := shepherd.StatusLive
+	if fields[9] == "1" {
+		status = shepherd.StatusExited
+	}
+	return shepherd.Session{
+		Name: fields[0], PaneID: fields[1], ID: fields[2], Backend: backend,
+		Prompt: prompt, LastUserMessage: lastUserMessage,
+		NativeStatus: parseNativeStatus(backend, fields[19], fields[20], fields[21], fields[22]),
+		Root:         root, Status: status, StartedAt: unixTime(startedUnix), EndedAt: unixTime(deadUnix),
+		LastActivityAt: unixTime(activityUnix), CurrentPath: fields[13], CurrentCommand: fields[14],
+		AttachedClients: attached, PaneInMode: paneModeCount != 0, InputDisabled: fields[17] == "1",
+		ObservationError: boundedObservationError(cause.Error()),
+	}
+}
+
+func boundedObservationError(value string) string {
+	const maxRunes = 240
+	value = format.OneLine(value)
+	runes := []rune(value)
+	if len(runes) > maxRunes {
+		value = string(runes[:maxRunes])
+	}
+	return value
+}
+
+func parseNativeStatus(backend shepherd.Backend, encodedState, encodedMetrics, titleMarker, paneTitle string) string {
+	switch backend {
+	case shepherd.BackendClaude:
+		state, _ := decodeMetadata(encodedState)
+		metrics, _ := decodeMetadata(encodedMetrics)
+		return runner.BoundedNativeStatus(strings.Join(nonemptyStatusParts(state, metrics), " · "))
+	case shepherd.BackendCodex:
+		if titleMarker != "1" {
+			return ""
+		}
+		return runner.BoundedNativeStatus(paneTitle)
+	default:
+		return ""
+	}
+}
+
+func nonemptyStatusParts(values ...string) []string {
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = runner.BoundedNativeStatus(value); value != "" {
+			parts = append(parts, value)
+		}
+	}
+	return parts
+}
+
+// PublishNativeStatus writes one Claude callback into pane-scoped tmux
+// metadata. The callback runs inside the pane, so TMUX_PANE is the authority;
+// values are base64 encoded and later sanitized and bounded again on read.
+func PublishNativeStatus(ctx context.Context, update runner.NativeStatusUpdate) error {
+	pane := strings.TrimSpace(os.Getenv("TMUX_PANE"))
+	if !validPaneID(pane) {
+		return errors.New("native status callback is not running in a tmux pane")
+	}
+	binary, err := exec.LookPath("tmux")
+	if err != nil {
+		return fmt.Errorf("publish native status: %w", err)
+	}
+	commands := make([][]string, 0, 2)
+	if state := runner.BoundedNativeStatus(update.State); state != "" {
+		commands = append(commands, []string{"set-option", "-p", "-t", pane, nativeStateOption, runner.Encode(state)})
+	}
+	if metrics := runner.BoundedNativeStatus(update.Metrics); metrics != "" {
+		commands = append(commands, []string{"set-option", "-p", "-t", pane, nativeMetricsOption, runner.Encode(metrics)})
+	}
+	if len(commands) == 0 {
+		return nil
+	}
+	command := exec.CommandContext(ctx, binary, joinTmuxCommands(commands)...)
+	if output, err := command.CombinedOutput(); err != nil {
+		return fmt.Errorf("publish native status: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func validPaneID(value string) bool {
+	if len(value) < 2 || value[0] != '%' {
+		return false
+	}
+	for _, character := range value[1:] {
+		if character < '0' || character > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func userMessagePreview(message string) string {

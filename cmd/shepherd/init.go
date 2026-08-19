@@ -11,8 +11,11 @@ import (
 
 	"github.com/ez-gz/shepherd/internal/format"
 	"github.com/ez-gz/shepherd/internal/home"
+	learnshepherd "github.com/ez-gz/shepherd/skills/learn-shepherd"
 	manageshepherd "github.com/ez-gz/shepherd/skills/manage-shepherd"
 )
+
+const quickstartDocumentName = "QUICKSTART.md"
 
 // claudePointer keeps one source of truth. Claude Code looks for CLAUDE.md and
 // Codex looks for AGENTS.md, so the pointer exists rather than a second copy of
@@ -33,6 +36,7 @@ func pilotDocs() []pilotDoc {
 	return []pilotDoc{
 		{relative: "AGENTS.md", contents: manageshepherd.Agents},
 		{relative: "CLAUDE.md", contents: claudePointer},
+		{relative: quickstartDocumentName, contents: learnshepherd.Instructions},
 		{relative: filepath.Join("skills", "manage-shepherd", "SKILL.md"), contents: manageshepherd.Skill},
 	}
 }

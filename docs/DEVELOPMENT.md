@@ -17,7 +17,9 @@ binary through `//go:embed`, which reads them **at compile time**. Editing the
 Markdown is the whole change; there is nothing to regenerate.
 
 So: change `quickstartPrompt`, change a help string, change a skill file — none
-of them need a build.
+of them need a generated-file step. The embedded `learn-shepherd` skill is
+installed as `~/.shepherd/QUICKSTART.md`; the launch prompt is intentionally
+only a short pointer to that file.
 
 ## What does gate a change: the tag
 
@@ -88,6 +90,7 @@ discover:
 | `make vet` | `go vet ./...` |
 | `make staticcheck` | staticcheck, pinned to a reviewed release |
 | `make version-check` | version is semver, README still installs `@latest` |
+| `make smoke` | install shape, fresh home, and 0.7.9 state upgrade |
 | `make test` | `go test ./...` |
 | `make race` | tests under the race detector, with tmux required |
 | `make clean` | remove `bin/shepherd` |
@@ -104,8 +107,8 @@ Two notes on the test suites:
 
 On every pull request:
 
-- `Verify` on **ubuntu** and **macOS**: gofmt, `go mod tidy`, vet, tests, race
-  tests, build — with real tmux installed on both.
+- `Verify` on **ubuntu** and **macOS**: gofmt, `go mod tidy`, vet, tests, local
+  install/upgrade smoke, race tests, and build — with real tmux installed on both.
 - `Cross-build` for `darwin/amd64` and `linux/arm64`, the platforms neither
   runner covers. Users compile locally, so a platform that stops building is a
   broken install for whoever is on it, with no artifact in between to fail first.

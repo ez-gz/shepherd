@@ -17,7 +17,7 @@ func TestCodexArgumentsUseOptionTerminator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := adapter.Arguments(Launch{Prompt: "--help", Title: "ignored", SessionID: "ignored"})
+	got := withoutInstrumentation(shepherd.BackendCodex, adapter.Arguments(Launch{Prompt: "--help", Title: "ignored", SessionID: "ignored"}))
 	want := []string{"--", "--help"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("Arguments() = %#v, want %#v", got, want)
@@ -29,9 +29,9 @@ func TestClaudeArgumentsCarryStableSessionIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := adapter.Arguments(Launch{
+	got := withoutInstrumentation(shepherd.BackendClaude, adapter.Arguments(Launch{
 		Prompt: "task", Title: "title", SessionID: "018f0000-0000-4000-8000-000000000000",
-	})
+	}))
 	want := []string{
 		"--session-id", "018f0000-0000-4000-8000-000000000000",
 		"--name", "title", "--", "task",
@@ -76,7 +76,7 @@ func TestResumeArgumentsNameTheConversationBeingContinued(t *testing.T) {
 			if !adapter.SupportsResume() {
 				t.Fatalf("%s reports it cannot resume", test.backend)
 			}
-			got := adapter.Arguments(launch)
+			got := withoutInstrumentation(test.backend, adapter.Arguments(launch))
 			if !slices.Equal(got, test.want) {
 				t.Fatalf("Arguments() = %#v, want %#v", got, test.want)
 			}
@@ -185,7 +185,7 @@ func TestExecEncodedCarriesConfiguredArgvWithoutShellEvaluation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+	got := withoutInstrumentation(shepherd.BackendClaude, strings.Split(strings.TrimSuffix(string(data), "\n"), "\n"))
 	want := []string{
 		"--configured", "$(touch " + marker + ")",
 		"--session-id", "018f0000-0000-4000-8000-000000000000",
@@ -235,7 +235,7 @@ func TestExecEncodedCarriesResumeTargetWithoutShellEvaluation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+	got := withoutInstrumentation(shepherd.BackendClaude, strings.Split(strings.TrimSuffix(string(data), "\n"), "\n"))
 	want := []string{"--resume", resume, "--name", "title", "--", "carry on"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("argv = %#v, want %#v", got, want)
@@ -255,9 +255,24 @@ func TestExecEncodedHelper(t *testing.T) {
 		os.Getenv("SHEPHERD_TEST_TITLE"),
 		os.Getenv("SHEPHERD_TEST_COMMAND"),
 		os.Getenv("SHEPHERD_TEST_RESUME"),
+		os.Getenv("SHEPHERD_TEST_FORK"),
 	)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(127)
 	}
+}
+
+func withoutInstrumentation(backend shepherd.Backend, arguments []string) []string {
+	result := append([]string(nil), arguments...)
+	flag := "--settings"
+	if backend == shepherd.BackendCodex {
+		flag = "-c"
+	}
+	for index := 0; index+1 < len(result); index++ {
+		if result[index] == flag {
+			return append(result[:index], result[index+2:]...)
+		}
+	}
+	return result
 }

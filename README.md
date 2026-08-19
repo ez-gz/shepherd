@@ -5,6 +5,11 @@ real Codex and Claude Code sessions inside a private tmux server, organizes them
 into durable workstreams, lets you send follow-ups, and hands your terminal
 directly to the native agent UI when you attach.
 
+You can operate Shepherd yourself or ask an LLM to operate it through the same
+guarded CLI. Shepherd packages an agent contract and command skill in its home
+directory so a native coding agent can organize workstreams and sessions,
+maintain notes and artifacts, and report state on your behalf.
+
 Tmux remains the runtime supervisor and the coding-agent CLIs remain the native
 runners. Shepherd adds a small durable organization layer without introducing a
 daemon, manager agent, task graph, or replacement execution engine.
@@ -31,6 +36,25 @@ daemon, manager agent, task graph, or replacement execution engine.
 - **Orphaned** — tmux panes carrying a Shepherd ID unknown to durable state; they
   are never silently adopted.
 
+## Topology
+
+A workstream is a logical bundle for an outcome, not a stage in a linear task
+graph:
+
+```text
+workstream: ship one feature
+├── roots: one or more repository directory routes
+├── sessions: development, tests, QA, PR feedback, or any other agent work
+│   └── runtime: the current tmux pane, when one still exists
+└── artifact_dir: notes.md, handoffs, checklists, and other shared files
+```
+
+Each session launches with one runner in exactly one registered root. Register
+multiple roots when one piece of work spans repositories—for example an API and
+its client—while keeping all of its sessions and durable context in one
+workstream. Codex and Claude command argv are configurable for compatible
+wrappers or variants; `no-agent` opens a plain shell.
+
 ## Install
 
 Shepherd currently targets macOS. Requirements: Go 1.25+, tmux 3.3+, and at
@@ -42,6 +66,11 @@ bundle.
 go install github.com/ez-gz/shepherd/cmd/shepherd@latest
 shepherd doctor
 ```
+
+Run `shepherd doctor --deep` when setup or terminal interaction looks wrong. It
+validates durable state, locks, private permissions, the tmux socket, pane
+metadata, mouse selection, and clipboard integration without writing diagnostic
+logs or reading prompts from terminal output.
 
 `@latest` resolves to the newest release tag, so this command never goes stale.
 Substitute an explicit tag when you need a particular release.
@@ -64,19 +93,32 @@ Override the destination with `make install PREFIX=/somewhere`.
 For an agent-guided first run, run:
 
 ```sh
+cd ~/code/my-project
 shepherd quickstart
 ```
 
-This embeds the [`learn-shepherd` skill](skills/learn-shepherd/SKILL.md) in the
-installed binary, prefers Claude when its configured executable is available,
-falls back to Codex, starts a real durable Shepherd session, and attaches to it
-immediately. Use
-`shepherd quickstart -r codex` or `shepherd quickstart -r claude` to choose explicitly.
+On first use Shepherd installs the [`learn-shepherd` guide](skills/learn-shepherd/SKILL.md)
+as `~/.shepherd/QUICKSTART.md`. This command starts a real durable Claude session
+inside `~/.shepherd`, gives it the title `Quickstart`, points it at that file,
+and attaches immediately. Because the session starts in Shepherd's own home, it
+also sees the installed agent contract and CLI skill instead of carrying either
+one in an oversized launch prompt. After you detach, the dashboard keeps the
+directory where you invoked `shepherd quickstart` as the launch root for your
+first project workstream.
 
-The guide's first lesson is how to detach. Press `Ctrl-b`, release both keys,
-then press `d`; `shepherd quickstart` will open the dashboard with the guide selected
-so it can walk you through sending a follow-up, reattaching, workstreams,
-and persistent notes.
+The guide's first lesson is a complete round trip. Press `Ctrl-b`, release both
+keys, then press `d`; `shepherd quickstart` opens the dashboard with the guide
+selected. `Up` and `Down` select rows, and empty `Enter` attaches the selected
+session. To reply before reattaching, press `Space` on the empty composer, type
+the message, and press `Enter`. A successful reply automatically returns the
+composer to new-session mode—do not press `Esc`, because an otherwise empty
+`Esc` parks the selection on Ungrouped. Press empty `Enter` to re-enter the
+still-selected Quickstart session.
+
+The tour then creates an outcome-oriented workstream, writes sample notes,
+handoff, and QA files into its artifact directory so their dashboard rendering
+is visible, and explains multiple roots, native status, durable human titles,
+and optional ephemeral automatic titles.
 
 ## Use it
 
@@ -113,14 +155,18 @@ key never depends on remembering which one you meant:
 | `Ctrl-R` | Rename the selected workstream, or edit/clear the selected session's durable title |
 | `Ctrl-T` | Mark the selected session for a move; on a workstream, move the marked session there or adopt an orphan |
 | `Ctrl-V` twice on a workstream | Archive it off the dashboard. The first press names what happens and the second does it; its sessions move to Ungrouped and keep running, and any other key cancels |
-| `Shift-Up` / `Shift-Down` | Reorder a named workstream, or move a session to the adjacent workstream |
+| `Shift-Up` / `Shift-Down` | Reorder a named workstream, or reorder a session within its named workstream; Ungrouped keeps live/newest order |
 | `Up` / `Down` | Select a workstream or session, or move between multiline composer rows |
 | `Option-Up` / `Option-Down` | Jump the selection to the previous or next workstream, passing over the sessions between |
+| Click a dashboard row | Select it without attaching or performing an organizing action; click its disclosure triangle to collapse or expand a workstream |
+| Wheel over the dashboard list, settings, or help | Move that viewport; mouse input never commits composer text or confirms a destructive action |
 | `Ctrl-G` | Enter resize mode; `Up` grows the lower pane, `Down` shows more sessions, `r` resets, and `Esc` exits |
 | `Enter` on a workstream | Collapse or expand its sessions |
 | `Enter` on a session | Attach its native terminal; inactive while replying, so it cannot attach to a row other than the pinned target |
 | `Ctrl-\` or `Ctrl-b d` while attached | Detach back to Shepherd |
-| `Shift-drag` while attached | Select with the terminal rather than tmux, crossing panes and taking whole lines; iTerm2 uses `Option` for this |
+| Drag while attached | Select and copy through tmux, independent of which runner owns the pane |
+| `Shift-drag` while attached | Bypass tmux and select with the terminal, crossing panes and taking whole lines; iTerm2 uses `Option` for this |
+| `Ctrl-b [` while attached | Enter keyboard copy mode; move to the start, press `Space`, extend the selection, and press `Enter` to copy; `Esc` exits |
 | `Ctrl-X` twice | Stop/remove a present runtime; once no pane remains, press twice again to delete its durable record |
 | `Esc` | Leave a reply and discard its draft, then clear the composer, then release a move mark, then select Ungrouped |
 | `Ctrl-C` | Quit the dashboard; `Esc` never quits |
@@ -140,43 +186,55 @@ it starts, so a session launched before 0.7.0 keeps the old behaviour until you
 restart it. A tmux too old to offer the encoding keeps the behaviour it had;
 nothing else about the session changes.
 
-The mouse is settled the same way, and it is worth knowing which program has it.
-The dashboard never asks for the mouse, so selecting there is your terminal's
-own. Attached, tmux takes it: a drag selects and copies to the system clipboard,
-and the wheel scrolls that pane's scrollback rather than your terminal's. Both
-are worth having, but tmux selects what is drawn on screen, so it stops at the
-pane edge and takes along whatever borders an agent's interface paints — which
-is why the same drag reads cleanly in one runner and raggedly in another. Hold
-`Shift` to hand the drag back to your terminal, which crosses panes, follows
-whole lines, and reaches its own scrollback. iTerm2 spells that `Option`.
+The mouse has one Shepherd contract instead of a runner-specific one. On the
+dashboard, click selects a row, its disclosure triangle collapses or expands a
+workstream, and the wheel moves the list, settings, or help viewport. A click
+never attaches, commits text, organizes, or confirms a destructive action.
+
+Attached, tmux owns every drag even when the runner requested mouse events, so
+the same gesture selects and copies in Codex, Claude, and a shell. Plain clicks
+and wheel events remain available to a runner that implements them; otherwise
+tmux handles them. The selection stops at the pane edge and includes whatever
+borders the runner drew. On macOS the drag-end copy goes directly through
+`pbcopy` as well as tmux's paste buffer and portable terminal-clipboard path, so
+a terminal that blocks OSC 52 is not a silent failure. Hold `Shift` to hand a
+dashboard or attached-session drag back to the terminal for native, cross-pane
+selection. iTerm2 spells that bypass modifier `Option`. For a mouse-free path,
+`Ctrl-b [` enters copy mode; move to the start, press `Space`, extend the
+selection, and press `Enter`. Those keys are the same under tmux's vi and emacs
+mode tables.
 
 Every full-screen surface carries an unmistakable mode badge: **Dashboard**,
 **Settings**, or **Help**. Organizing happens on the dashboard rather than in a
 view of its own.
 
 Each session row carries a **brief**: the durable user title when one is set,
-otherwise a one-line initial task, followed after `↳` by what the session is
-doing. The two halves get separate width budgets, so a long title cannot crowd
-the second out and a narrow row drops it rather than showing a fragment of it.
-Rows omit the label that names the field — twenty columns the text itself can
-use — and the details pane below still spells it out.
+then an optional ephemeral automatic title, otherwise a one-line initial task,
+followed after `↳` by what the session is doing. The two halves get separate
+width budgets, so a long title cannot crowd the second out and a narrow row
+drops it rather than showing a fragment of it. Rows omit the label that names
+the field — twenty columns the text itself can use — and the details pane below
+still spells it out.
 
 That second half is a real status line, not a restatement of what you typed:
 
 ```text
-● claude  a1b2c3  live   Fix flaky OAuth tests  ↳ ~running make check
-● claude  d4e5f6  live   Release the Linux build ↳ ~editing packaging.go
-● codex   9a8b7c  live   Rewrite the retry loop  ↳ also check the timeout
+● claude  a1b2c3  live   Fix flaky OAuth tests   ↳ Working · Opus · high · 18% ctx
+● codex   d4e5f6  live   Release the Linux build ↳ Working · gpt-5.6-codex · 42% ctx
+● claude  9a8b7c  live   Rewrite the retry loop  ↳ ~editing retry.go
 ```
 
-Shepherd reads it from the transcript Claude Code writes for the session it
-launched — the last tool call, or the first line of a finished reply. The `~` is
-not decoration: the phrase is derived from another program's records, so it is
-marked as something Shepherd was told rather than saw. Codex writes an equivalent
-record but mints its own session id, so Shepherd cannot tell which file belongs to
-which session; those rows fall through to the latest message sent through
-Shepherd, as before. Text entered directly in an attached native terminal is not
-observable either way.
+For sessions launched by this version, the runner publishes a bounded native
+status. Claude receives a session-local status line and lifecycle hooks; Codex
+receives a session-local terminal-title layout. Shepherd projects that data
+through tmux without writing it to `state.json` or inferring it from terminal
+text. Older live sessions keep the launch contract they started with and fall
+through to transcript activity or the latest message sent through Shepherd.
+
+The `~` is not decoration: transcript activity is a phrase derived from another
+program's records, so it is marked as something Shepherd was told rather than
+directly observed. Text entered directly in an attached native terminal remains
+outside Shepherd's message history.
 
 Which sources fill a brief is a single ordered layout you can change in
 settings, so a row can show only your title, or drop the activity line, or carry
@@ -217,12 +275,14 @@ shepherd ws rename "API work" "Public API"
 shepherd ws reorder "Public API" --up
 shepherd title a1b2c3 "OAuth retry investigation"
 shepherd move a1b2c3 --workstream "Public API"
+shepherd reorder a1b2c3 --up
 shepherd move a1b2c3 --ungrouped
 shepherd adopt a1b2c3 -w "Public API"
 shepherd peek a1b2c3
 shepherd history a1b2c3 --last 10
 shepherd conversation a1b2c3
 shepherd resume a1b2c3 "Pick this back up and finish the retry work"
+shepherd fork a1b2c3 "Try the alternate design in a new Codex branch"
 shepherd ws archive "Public API" --yes
 shepherd delete a1b2c3 --yes
 ```
@@ -233,11 +293,11 @@ after positional arguments. `shepherd ws archive` and `shepherd delete` require 
 `--yes`.
 
 `shepherd list --json` returns a machine-readable projection of workstreams and
-sessions, including durable/display titles, latest-via-Shepherd text, runtime
-availability, a stable process-state enum, and an `exit_code` that is `null`
-when tmux cannot prove the outcome. Every command above accepts `--json` and
-returns a machine-readable result. These are local human CLI surfaces; they do
-not enable manager authority.
+sessions, including durable/display titles, latest-via-Shepherd text, bounded
+`native_status`, runtime availability, a stable process-state enum, and an
+`exit_code` that is `null` when tmux cannot prove the outcome. Every command
+above accepts `--json` and returns a machine-readable result. These are local
+human CLI surfaces; they do not enable manager authority.
 
 ## Resuming a conversation
 
@@ -251,9 +311,19 @@ shepherd conversation a1b2c3    # the runner conversation id, and how Shepherd k
 shepherd resume a1b2c3 "Pick this back up and finish the retry work"
 ```
 
-Resuming starts a *new* session that continues the old conversation. The
-original record is left exactly as it was, because it is the durable account of
-what already happened, including how it ended.
+For Codex, resume enforces one live writer per native conversation. If a live
+Shepherd session already owns it, the message is sent to that pane. If it is
+unowned, Shepherd starts `codex resume` in a new durable session. Multiple live
+owners are refused rather than compounded. Creating a branch is a separate,
+explicit operation:
+
+```sh
+shepherd fork a1b2c3 "Try the alternate design"
+```
+
+The unowned resume path leaves the original record exactly as it was, because
+it is the durable account of what already happened. Shepherd never removes or
+rewrites Codex's own lock files.
 
 How the id is known differs by runner, and Shepherd reports which case it is
 rather than presenting them as the same fact:
@@ -298,12 +368,15 @@ Shepherd's state. Shepherd writes the instructions for one into `~/.shepherd`:
 ~/.shepherd/
   AGENTS.md                       operating contract, read by Codex and Claude
   CLAUDE.md                       pointer to AGENTS.md
+  QUICKSTART.md                   interactive first-use guide read by Claude
   skills/manage-shepherd/SKILL.md   the full command reference
 ```
 
 A new installation is also seeded with one workstream named `shepherd-managers`,
 rooted only at `~/.shepherd`, so there is somewhere to launch pilots from the
-dashboard without building it by hand.
+dashboard without building it by hand. `shepherd quickstart` performs that
+one-time provisioning before it records the Quickstart session, and places the
+session in the workstream.
 
 It is seeded only on an installation that has never written durable state, and
 the state file is what marks that: reads never create it and no-op mutations
@@ -348,7 +421,7 @@ followed by two honest system groups:
 Organizing is done in place. Each chord carries a verb and reads the selected
 row for its noun, so one key covers both nouns it could apply to: `Ctrl-R`
 renames a workstream or retitles a session, and `Shift-Up`/`Shift-Down`
-reorders a named workstream or walks a session to the adjacent one. `Ctrl-N`
+reorders a named workstream or a member session within that workstream. `Ctrl-N`
 creates a workstream. `Ctrl-T` marks a session with `◆` and moves it into the
 next workstream you select, adopting an orphan explicitly when that is what it
 is. The synthetic Ungrouped and Orphaned sections remain fixed after named
@@ -406,9 +479,11 @@ Workstream state is separate from settings. It remains a versioned, locked JSON
 sidecar at `~/.shepherd/state.json`; ordinary workstream files live in
 `~/.shepherd/workstreams/<id>/`. State updates are serialized with a
 local advisory lock so CLI commands and the dashboard cannot overwrite one
-another. State schema v3 stores durable titles and native conversation IDs. A
-valid v1 or v2 file is validated and atomically migrated without manufacturing
-a domain revision; future or invalid versions are rejected.
+another. State schema v4 stores durable titles, native conversation IDs, and a
+dense position for each named-workstream membership. Valid v1-v3 files are
+validated and atomically migrated without manufacturing a domain revision;
+future or invalid versions are rejected. New and moved-in members append to the
+bottom; Ungrouped sessions intentionally retain the live/newest projection.
 
 ## The Shepherd directory
 
@@ -490,8 +565,10 @@ The built-in sources are:
 | Source | What fills it |
 | --- | --- |
 | `title` | the durable title you gave the session |
+| `automatic-title` | an ephemeral GPT-5.6 Luna title when explicitly enabled |
 | `prompt` | the immutable task it was launched with |
 | `latest` | the most recent message sent through Shepherd |
+| `status` | bounded status published directly by the native runner |
 | `activity` | what the runner last recorded the session doing |
 | `runner` | `claude session`, as a last resort |
 
@@ -521,9 +598,9 @@ Shepherd runs:
 {
   "brief": {
     "lead": ["title", "prompt", "runner"],
-    "detail": ["status", "activity", "latest"],
+    "detail": ["ci-status", "status", "activity", "latest"],
     "sources": {
-      "status": {
+      "ci-status": {
         "command": ["agent-status", "--porcelain"],
         "interval_seconds": 5,
         "timeout_seconds": 2
@@ -532,6 +609,22 @@ Shepherd runs:
   }
 }
 ```
+
+### Optional automatic titles
+
+Automatic titles are off by default. Opt in with the top-level setting:
+
+```json
+{
+  "automatic_title": true
+}
+```
+
+When `OPENAI_API_KEY` is present, the dashboard sends the first completed-turn
+output once to `gpt-5.6-luna` and keeps the short result in memory. It never
+rewrites the durable session title, and a title you set always wins. Without the
+key, no transcript is read and no API call is attempted. The settings screen
+shows whether the feature is active.
 
 The command is argv, not a shell string. It runs once per session, is told
 which session through `SHEPHERD_SESSION_ID`, `SHEPHERD_SESSION_RUNNER`,
@@ -577,13 +670,13 @@ The dashboard also accepts `--runner`, `--root` / `-C`, and `--socket`.
 
 An interactive agent process stays alive while it is thinking, waiting for
 input, or simply sitting at its prompt. Tmux cannot distinguish those semantic
-states. Shepherd therefore reports process truth only: `live`, `attached`,
-`exited`, or `failed`, plus runtime, path, terminal activity, output preview,
-and an exit code when tmux supplies one. Some retained dead panes—especially on
-older tmux versions—omit `pane_dead_status`; Shepherd reports their process as
-exited with an unknown outcome and never guesses zero or persists a successful
-exit. It does not invent “completed” or “needs input” states, nor does it guess
-token usage.
+states. Shepherd reports process truth as `live`, `attached`, `exited`, or
+`failed`, plus runtime, path, terminal activity, output preview, and an exit code
+when tmux supplies one. New agent sessions may also carry a separate bounded
+native status published by Claude or Codex; Shepherd never derives that status
+from terminal text. Some retained dead panes—especially on older tmux
+versions—omit `pane_dead_status`; Shepherd reports their process as exited with
+an unknown outcome and never guesses zero or persists a successful exit.
 
 Workstreams are organization, not autonomy. Shepherd has no manager role,
 coordination grants, approvals, parent-child sessions, task graph, automatic

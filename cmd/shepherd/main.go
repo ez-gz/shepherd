@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -26,18 +27,33 @@ import (
 	"github.com/ez-gz/shepherd/internal/transcript"
 	"github.com/ez-gz/shepherd/internal/ui"
 	"github.com/ez-gz/shepherd/internal/workstream"
-	learnshepherd "github.com/ez-gz/shepherd/skills/learn-shepherd"
 )
 
-var version = "0.7.5"
+var version = "0.8.0"
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "__statusline" {
+		// Instrumentation is observational and must never break the runner that
+		// invoked it. Malformed input or a disappearing pane therefore produces
+		// no output and exits successfully.
+		if len(os.Args) == 3 && os.Args[2] == "claude" {
+			if update, err := runner.ReadClaudeStatus(os.Stdin); err == nil {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				_ = supervisor.PublishNativeStatus(ctx, update)
+				cancel()
+				if update.Display != "" {
+					fmt.Fprintln(os.Stdout, update.Display)
+				}
+			}
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "__agent" {
-		if len(os.Args) != 7 {
+		if len(os.Args) != 8 {
 			fmt.Fprintln(os.Stderr, "shepherd: invalid internal runner invocation")
 			os.Exit(2)
 		}
-		if err := runner.ExecEncoded(os.Args[2], os.Args[3], os.Args[4], os.Args[5], os.Args[6]); err != nil {
+		if err := runner.ExecEncoded(os.Args[2], os.Args[3], os.Args[4], os.Args[5], os.Args[6], os.Args[7]); err != nil {
 			fmt.Fprintln(os.Stderr, "shepherd:", err)
 			os.Exit(127)
 		}
@@ -127,6 +143,8 @@ func (a *app) run(args []string) error {
 		return a.runHistory(args[1:])
 	case "resume":
 		return a.runResume(args[1:])
+	case "fork":
+		return a.runFork(args[1:])
 	case "conversation":
 		return a.runConversation(args[1:])
 	case "ws", "workstream":
@@ -135,6 +153,8 @@ func (a *app) run(args []string) error {
 		return a.runTitle(args[1:])
 	case "move":
 		return a.runMove(args[1:])
+	case "reorder":
+		return a.runSessionReorder(args[1:])
 	case "adopt":
 		return a.runAdopt(args[1:])
 	case "delete":
@@ -222,13 +242,9 @@ func (a *app) runDashboardSelected(args []string, selectedSessionID string) erro
 
 func (a *app) runQuickstart(args []string) error {
 	flags := a.newFlagSet("shepherd quickstart")
-	root := flags.String("root", a.workdir(), "project root for the guided session")
-	flags.StringVar(root, "C", *root, "project root for the guided session")
-	runnerValue := flags.String("runner", "", "guide runner: claude or codex (default: prefer claude)")
-	flags.StringVar(runnerValue, "r", *runnerValue, "guide runner: claude or codex (default: prefer claude)")
 	socket := flags.String("socket", defaultSocket(), "private tmux socket name")
 	flags.Usage = func() {
-		fmt.Fprintln(flags.Output(), "Usage: shepherd quickstart [-r claude|codex] [-C DIR]")
+		fmt.Fprintln(flags.Output(), "Usage: shepherd quickstart")
 		flags.PrintDefaults()
 	}
 	if err := flags.Parse(args); err != nil {
@@ -238,36 +254,39 @@ func (a *app) runQuickstart(args []string) error {
 		return err
 	}
 	if flags.NArg() != 0 {
-		return errors.New("usage: shepherd quickstart [-r claude|codex] [-C dir]")
+		return errors.New("usage: shepherd quickstart")
 	}
 	_, settings, err := a.settings()
 	if err != nil {
 		return err
 	}
-	backend, err := quickstartBackend(*runnerValue, settings)
+	projectRoot, err := filepath.Abs(a.workdir())
+	if err != nil {
+		return fmt.Errorf("resolve dashboard root: %w", err)
+	}
+	if _, err := runner.ResolveCommand(shepherd.BackendClaude, settings.Command(shepherd.BackendClaude)); err != nil {
+		return fmt.Errorf("quickstart requires Claude: %w", err)
+	}
+	dir, _, err := installPilotDocs(false)
 	if err != nil {
 		return err
 	}
-	absRoot, err := filepath.Abs(*root)
+	stateStore, err := workstream.DefaultStore()
 	if err != nil {
-		return fmt.Errorf("resolve root: %w", err)
+		return err
 	}
 	controller, err := a.dial(*socket)
 	if err != nil {
 		return err
 	}
 	startContext, cancelStart := context.WithTimeout(context.Background(), 8*time.Second)
-	session, err := controller.Start(startContext, control.StartRequest{
-		Backend: backend,
-		Prompt:  quickstartPrompt(),
-		Root:    absRoot,
-	})
+	session, err := launchQuickstart(startContext, controller, stateStore, dir, a.err)
 	cancelStart()
 	if err != nil {
 		return err
 	}
 
-	fmt.Fprintf(a.out, "started guided %s session %s\n", backend, format.ShortID(session.ID))
+	fmt.Fprintf(a.out, "started guided Claude session %s in %s\n", format.ShortID(session.ID), dir)
 	fmt.Fprintln(a.err, "attaching now · your first lesson is Ctrl-b, release, then d")
 	attachContext, cancelAttach := context.WithTimeout(context.Background(), 5*time.Second)
 	command, err := controller.AttachCommand(attachContext, session.ID)
@@ -281,40 +300,46 @@ func (a *app) runQuickstart(args []string) error {
 
 	fmt.Fprintln(a.err, "detached · opening shepherd with the guide selected")
 	return a.runDashboardSelected([]string{
-		"--runner", string(backend),
-		"--root", absRoot,
+		"--runner", string(shepherd.BackendClaude),
+		"--root", projectRoot,
 		"--socket", *socket,
 	}, session.ID)
 }
 
-func quickstartBackend(value string, settings config.Config) (shepherd.Backend, error) {
-	if strings.TrimSpace(value) != "" {
-		backend, err := shepherd.ParseBackend(value)
-		if err != nil {
-			return "", err
+func launchQuickstart(ctx context.Context, controller control.Service, store workstream.FileStore, dir string, writer io.Writer) (control.Session, error) {
+	// Provision before Start writes the first session record. The durable state
+	// file is the one-time installation marker, so reversing these two actions
+	// would permanently suppress the managers workstream on a fresh install.
+	provisionInstallation(ctx, controller, store, writer)
+
+	workstreamID := ""
+	snapshot, err := controller.Snapshot(ctx)
+	if err != nil {
+		return control.Session{}, fmt.Errorf("find the %s workstream: %w", ManagersWorkstreamName, err)
+	}
+	for _, item := range snapshot.Workstreams {
+		if item.ArchivedAt == nil && strings.EqualFold(item.Name, ManagersWorkstreamName) {
+			workstreamID = item.ID
+			break
 		}
-		if backend == shepherd.BackendNoAgent {
-			return "", errors.New("quickstart requires the claude or codex runner")
-		}
-		if _, err := runner.ResolveCommand(backend, settings.Command(backend)); err != nil {
-			return "", err
-		}
-		return backend, nil
 	}
 
-	var failures []string
-	for _, backend := range []shepherd.Backend{shepherd.BackendClaude, shepherd.BackendCodex} {
-		if _, err := runner.ResolveCommand(backend, settings.Command(backend)); err == nil {
-			return backend, nil
-		} else {
-			failures = append(failures, err.Error())
-		}
+	document := filepath.Join(dir, quickstartDocumentName)
+	session, err := controller.Start(ctx, control.StartRequest{
+		Backend: shepherd.BackendClaude, Prompt: quickstartPrompt(document), Root: dir,
+		WorkstreamID: workstreamID,
+	})
+	if err != nil {
+		return session, err
 	}
-	return "", fmt.Errorf("quickstart requires claude or codex: %s", strings.Join(failures, "; "))
+	if err := controller.SetSessionTitle(ctx, session.ID, "Quickstart"); err != nil {
+		return session, fmt.Errorf("title Quickstart session %s: %w (the session is still available in shepherd)", format.ShortID(session.ID), err)
+	}
+	return session, nil
 }
 
-func quickstartPrompt() string {
-	return "Guide me through my first Shepherd workstream and session. You are running inside the guided session created by shepherd quickstart. Follow the embedded skill below, begin with its in-session path, teach one action at a time, and wait for me after each action.\n\n" + learnshepherd.Instructions
+func quickstartPrompt(document string) string {
+	return fmt.Sprintf("You are the Shepherd Quickstart guide. Read %q and follow it exactly. Teach one action at a time and wait for me after each action.", document)
 }
 
 func (a *app) runSpawn(args []string) error {
@@ -467,6 +492,7 @@ func (a *app) runAttach(args []string) error {
 		return err
 	}
 	fmt.Fprintln(a.err, "detach back with Ctrl-\\ or Ctrl-b d")
+	fmt.Fprintln(a.err, "drag copies through tmux · Shift-drag selects natively · iTerm2 uses Option")
 	command, err := controller.AttachCommand(ctx, session.ID)
 	if err != nil {
 		return err
@@ -507,11 +533,12 @@ func (a *app) runDoctor(args []string) error {
 	}
 	flags := a.newFlagSet("shepherd doctor")
 	socket := flags.String("socket", defaultSocket(), "private tmux socket name")
+	deep := flags.Bool("deep", false, "validate state, locks, permissions, socket, and clipboard integration")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if flags.NArg() != 0 {
-		return errors.New("usage: shepherd doctor")
+		return errors.New("usage: shepherd doctor [--deep]")
 	}
 	stateStore, err := workstream.DefaultStore()
 	if err != nil {
@@ -559,9 +586,6 @@ func (a *app) runDoctor(args []string) error {
 			fmt.Fprintf(a.out, "[missing] %-7s %s (%s)\n", check.name, format.OneLine(requested), label)
 			continue
 		}
-		if check.runner {
-			runnersFound++
-		}
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		versionArguments := append(append([]string(nil), command[1:]...), check.version...)
 		output, err := exec.CommandContext(ctx, path, versionArguments...).CombinedOutput()
@@ -569,6 +593,9 @@ func (a *app) runDoctor(args []string) error {
 		if err != nil {
 			fmt.Fprintf(a.out, "[warn]    %-7s %s\n", check.name, format.OneLine(path))
 			continue
+		}
+		if check.runner {
+			runnersFound++
 		}
 		versionText := format.OneLine(string(output))
 		if check.name == "tmux" {
@@ -582,7 +609,7 @@ func (a *app) runDoctor(args []string) error {
 	}
 	if runnersFound == 0 {
 		failed = true
-		fmt.Fprintln(a.out, "[missing] runner  install at least one of codex or claude")
+		fmt.Fprintln(a.out, "[missing] runner  no runnable codex or claude installation found")
 	}
 	fmt.Fprintf(a.out, "[config]  socket  tmux -L %s\n", format.OneLine(*socket))
 	fmt.Fprintf(a.out, "[config]  file    %s\n", format.OneLine(configStore.Path))
@@ -590,11 +617,165 @@ func (a *app) runDoctor(args []string) error {
 	fmt.Fprintf(a.out, "[state]   files   %s\n", format.OneLine(stateStore.Artifacts))
 	fmt.Fprintf(a.out, "[config]  runner  %s\n", settings.DefaultRunner)
 	fmt.Fprintf(a.out, "[config]  root    %s\n", format.OneLine(a.workdir()))
+	if *deep {
+		if deepDoctorFailed(a.out, configStore.Path, stateStore, *socket) {
+			failed = true
+		}
+	}
 	if failed {
-		return errors.New("required dependencies are missing")
+		return errors.New("doctor found problems")
 	}
 	fmt.Fprintln(a.out, "[next]   tour    shepherd quickstart")
 	return nil
+}
+
+func deepDoctorFailed(writer io.Writer, configPath string, stateStore workstream.FileStore, socket string) bool {
+	failed := false
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	state, err := stateStore.Load(ctx)
+	cancel()
+	if err != nil {
+		failed = true
+		fmt.Fprintf(writer, "[fail]    state   %s\n", format.OneLine(err.Error()))
+	} else {
+		fmt.Fprintf(writer, "[ok]      state   schema %d · revision %d · %d workstreams · %d sessions\n",
+			state.Version, state.Revision, len(state.Workstreams), len(state.Sessions))
+	}
+
+	lockCtx, lockCancel := context.WithTimeout(context.Background(), 750*time.Millisecond)
+	lockErr := stateStore.WithLifecycleLock(lockCtx, func() error { return nil })
+	lockCancel()
+	if lockErr != nil {
+		failed = true
+		fmt.Fprintf(writer, "[fail]    lock    %s\n", format.OneLine(lockErr.Error()))
+	} else {
+		fmt.Fprintln(writer, "[ok]      lock    state and lifecycle locks are available")
+	}
+
+	permissionPaths := []doctorPermission{
+		{label: "home", path: filepath.Dir(stateStore.Path), directory: true, required: true},
+		{label: "config", path: configPath},
+		{label: "state", path: stateStore.Path, required: err == nil && state.Revision > 0},
+		{label: "state lock", path: stateStore.Path + ".lock", required: true},
+		{label: "lifecycle lock", path: stateStore.Path + ".lifecycle.lock", required: true},
+		{label: "artifacts", path: stateStore.Artifacts, directory: true, required: err == nil && len(state.Workstreams) > 0},
+	}
+	if err == nil {
+		for _, item := range state.Workstreams {
+			permissionPaths = append(permissionPaths, doctorPermission{
+				label: "workstream " + format.ShortID(item.ID), path: item.ArtifactDir, directory: true, required: true,
+			})
+		}
+	}
+	seen := make(map[string]bool)
+	for _, check := range permissionPaths {
+		if seen[check.path] {
+			continue
+		}
+		seen[check.path] = true
+		if !doctorPrivatePath(writer, check) {
+			failed = true
+		}
+	}
+
+	manager, managerErr := supervisor.New(socket)
+	if managerErr != nil {
+		failed = true
+		fmt.Fprintf(writer, "[fail]    socket  %s\n", format.OneLine(managerErr.Error()))
+		return failed
+	}
+	socketCtx, socketCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	health, inspectErr := manager.Inspect(socketCtx)
+	socketCancel()
+	if inspectErr != nil {
+		failed = true
+		fmt.Fprintf(writer, "[fail]    socket  %s\n", format.OneLine(inspectErr.Error()))
+		return failed
+	}
+	if !health.ServerRunning {
+		fmt.Fprintln(writer, "[ok]      socket  inactive; it will start on the first session launch")
+		return failed
+	}
+	fmt.Fprintf(writer, "[ok]      socket  active · %d sessions\n", health.SessionCount)
+	if health.Bootstrap != supervisor.ExpectedBootstrapVersion() {
+		failed = true
+		fmt.Fprintf(writer, "[fail]    tmux    bootstrap %q, want %q; reopen Shepherd to refresh it\n",
+			health.Bootstrap, supervisor.ExpectedBootstrapVersion())
+	} else {
+		fmt.Fprintf(writer, "[ok]      tmux    bootstrap %s\n", health.Bootstrap)
+	}
+	if health.Mouse != "on" || !strings.Contains(health.DragBinding, "copy-mode") || !strings.Contains(health.DragBinding, "-M") {
+		failed = true
+		fmt.Fprintln(writer, "[fail]    mouse   copy-first drag binding is not active")
+	} else {
+		fmt.Fprintln(writer, "[ok]      mouse   copy-first selection is active")
+	}
+	clipboardOK := health.SetClipboard == "on" && strings.Contains(health.CopyBinding, "copy-pipe-and-cancel")
+	if runtime.GOOS == "darwin" {
+		clipboardOK = clipboardOK && health.CopyCommand == "/usr/bin/pbcopy"
+	}
+	if !clipboardOK {
+		failed = true
+		fmt.Fprintln(writer, "[fail]    copy    tmux clipboard integration is incomplete")
+	} else {
+		fmt.Fprintln(writer, "[ok]      copy    tmux clipboard integration is active")
+	}
+	if len(health.DegradedPanes) > 0 {
+		failed = true
+		fmt.Fprintf(writer, "[fail]    panes   %d session panes have degraded Shepherd metadata\n", len(health.DegradedPanes))
+		for _, pane := range health.DegradedPanes {
+			fmt.Fprintf(writer, "[fail]    pane    %s · %s\n", format.ShortID(pane.ID), format.OneLine(pane.Reason))
+		}
+	} else {
+		fmt.Fprintln(writer, "[ok]      panes   all Shepherd pane metadata is readable")
+	}
+	return failed
+}
+
+type doctorPermission struct {
+	label     string
+	path      string
+	directory bool
+	required  bool
+}
+
+func doctorPrivatePath(writer io.Writer, check doctorPermission) bool {
+	info, err := os.Lstat(check.path)
+	if errors.Is(err, os.ErrNotExist) {
+		if check.required {
+			fmt.Fprintf(writer, "[fail]    perms   %-14s missing: %s\n", check.label, format.OneLine(check.path))
+			return false
+		}
+		fmt.Fprintf(writer, "[skip]    perms   %-14s not created yet\n", check.label)
+		return true
+	}
+	if err != nil {
+		fmt.Fprintf(writer, "[fail]    perms   %-14s %s\n", check.label, format.OneLine(err.Error()))
+		return false
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		fmt.Fprintf(writer, "[fail]    perms   %-14s symlink is not accepted: %s\n", check.label, format.OneLine(check.path))
+		return false
+	}
+	if check.directory != info.IsDir() {
+		kind := "file"
+		if check.directory {
+			kind = "directory"
+		}
+		fmt.Fprintf(writer, "[fail]    perms   %-14s expected %s: %s\n", check.label, kind, format.OneLine(check.path))
+		return false
+	}
+	required := os.FileMode(0o600)
+	if check.directory {
+		required = 0o700
+	}
+	mode := info.Mode().Perm()
+	if mode&0o077 != 0 || mode&required != required {
+		fmt.Fprintf(writer, "[fail]    perms   %-14s %04o (want private owner access)\n", check.label, mode)
+		return false
+	}
+	fmt.Fprintf(writer, "[ok]      perms   %-14s %04o\n", check.label, mode)
+	return true
 }
 
 func printHelp(writer io.Writer) {
@@ -603,8 +784,7 @@ func printHelp(writer io.Writer) {
 Usage:
   shepherd [--runner codex|claude|no-agent] [-C DIR]
                                         open the dashboard
-  shepherd quickstart [-r claude|codex] [-C DIR]
-                                        launch and attach an agent-guided tour
+  shepherd quickstart                    launch Claude in ~/.shepherd for an agent-guided tour
   shepherd spawn [--json] [-r RUNNER] [-C DIR] [-w WORKSTREAM] LABEL
                                         start a session without the dashboard
   shepherd list [--json]                      list sessions
@@ -613,9 +793,10 @@ Usage:
   shepherd peek ID [--lines N]                print the pane's current frame
   shepherd history ID [--last N] [--json]     print what the runner recorded happened
   shepherd conversation ID [--json]           print the runner conversation id Shepherd registered
-  shepherd resume [--json] ID MESSAGE         continue that conversation in a new session
+  shepherd resume [--json] ID MESSAGE         send to its live Codex owner, or resume when unowned
+  shepherd fork [--json] ID MESSAGE           explicitly branch a Codex conversation
   shepherd stop ID                            stop runtime; keep the durable record
-  shepherd doctor                             check local dependencies
+  shepherd doctor [--deep]                    check dependencies; deeply validate local runtime health
 
 Organize (the same actions the dashboard chords perform, plus roots and archive):
   shepherd ws list [--json]                   list workstreams, roots, session counts
@@ -630,6 +811,7 @@ Organize (the same actions the dashboard chords perform, plus roots and archive)
                                         set or clear a durable session title
   shepherd move ID --workstream WS|--ungrouped
                                         change workstream membership
+  shepherd reorder ID --up|--down            move it within its workstream
   shepherd adopt ID [-w WORKSTREAM]           claim an orphaned tmux pane
   shepherd delete ID --yes                    delete a durable record with no runtime
 
@@ -656,7 +838,7 @@ Dashboard:
   Ctrl-N            create a workstream, named through the composer
   Ctrl-R            rename a workstream or edit/clear a session title
   Ctrl-T            mark a session; Ctrl-T on a workstream moves or adopts it
-  Shift-↑/↓         reorder a workstream, or move a session to the next one
+  Shift-↑/↓         reorder a workstream or a session within its workstream
   Ctrl-b d          detach the native terminal back to shepherd
   Ctrl-\            alternate one-chord detach shortcut
   Ctrl-X twice      stop runtime; repeat once pane-free to delete record
@@ -813,6 +995,8 @@ type cliSessionJSON struct {
 	ExitCode          *int             `json:"exit_code"`
 	RuntimeSeconds    int64            `json:"runtime_seconds"`
 	LastActivityAt    *time.Time       `json:"last_activity_at,omitempty"`
+	NativeStatus      string           `json:"native_status,omitempty"`
+	DegradedReason    string           `json:"degraded_reason,omitempty"`
 }
 
 func newCLISnapshot(snapshot control.Snapshot) cliSnapshotJSON {
@@ -844,6 +1028,12 @@ func newCLISnapshot(snapshot control.Snapshot) cliSnapshotJSON {
 			value := observed
 			lastActivityAt = &value
 		}
+		nativeStatus := ""
+		degradedReason := ""
+		if session.Runtime != nil {
+			nativeStatus = session.Runtime.NativeStatus
+			degradedReason = session.Runtime.ObservationError
+		}
 		result.Sessions = append(result.Sessions, cliSessionJSON{
 			ID: session.ID, Runner: session.Backend, State: string(session.Status),
 			Title: title, DisplayTitle: displayTitle, InitialPrompt: session.Prompt,
@@ -852,6 +1042,8 @@ func newCLISnapshot(snapshot control.Snapshot) cliSnapshotJSON {
 			Root: session.Root, Available: session.Available(), Alive: session.Alive(), Orphaned: session.Orphaned,
 			ExitCode: exitCode, RuntimeSeconds: int64(session.RuntimeDuration(time.Now()).Seconds()),
 			LastActivityAt: lastActivityAt,
+			NativeStatus:   nativeStatus,
+			DegradedReason: degradedReason,
 		})
 	}
 	return result

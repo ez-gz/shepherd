@@ -27,10 +27,16 @@ const (
 // provenance. The mark is a glyph rather than a dim style because a row has to
 // stay readable in a terminal with no color.
 func displayFragment(fragment brief.Fragment) string {
+	text := fragment.Text
 	if fragment.Proven || fragment.Empty() {
-		return fragment.Text
+		// keep the text as-is
+	} else {
+		text = briefApproximateMark + text
 	}
-	return briefApproximateMark + fragment.Text
+	if fragment.Source == brief.SourceStatus && fragment.Runner != "" {
+		return backendStyle(fragment.Runner).Render(text)
+	}
+	return text
 }
 
 // renderBrief lays the two slots against separate budgets.
@@ -75,6 +81,9 @@ func (m Model) briefRegistry() brief.Registry {
 }
 
 func (m Model) sessionBrief(session control.Session) brief.Brief {
+	if m.settings.AutomaticTitle && strings.TrimSpace(session.Record.Title) == "" {
+		session.AutomaticTitle = m.automaticTitles[session.ID]
+	}
 	return m.briefLayout().Resolve(session, m.briefRegistry())
 }
 

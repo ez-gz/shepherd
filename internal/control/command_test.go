@@ -154,10 +154,33 @@ func TestCommandScopeValidationPrecedesAuthorization(t *testing.T) {
 		t.Fatal("authorizer ran for structurally invalid command")
 	}
 
+	_, err = controller.Execute(context.Background(), humanCommand(InstallationScope(), ReorderSessionAction{
+		SessionID: "018f0000-0000-4000-8000-000000000075", Delta: -1,
+	}))
+	if err == nil || !strings.Contains(err.Error(), "requires workstream scope") {
+		t.Fatalf("session reorder scope error = %v", err)
+	}
+
 	_, err = controller.Execute(context.Background(), humanCommand(WorkstreamScope(workstreamID), MoveSessionAction{
 		SessionID: "018f0000-0000-4000-8000-000000000075", WorkstreamID: "018f0000-0000-4000-8000-000000000076",
 	}))
 	if err == nil || !strings.Contains(err.Error(), "must match") {
 		t.Fatalf("mismatched destination error = %v", err)
+	}
+}
+
+func TestCommandRejectsOversizedInteractivePayloads(t *testing.T) {
+	tooLarge := strings.Repeat("x", shepherd.MaxInteractivePayloadBytes+1)
+	tests := []Action{
+		StartAction{Prompt: tooLarge},
+		ResumeSessionAction{Prompt: tooLarge},
+		ForkSessionAction{Prompt: tooLarge},
+		SendAction{Message: tooLarge},
+	}
+	for _, action := range tests {
+		command := humanCommand(InstallationScope(), action)
+		if err := validateCommand(command); err == nil || !strings.Contains(err.Error(), "maximum") {
+			t.Errorf("validateCommand(%T) error = %v", action, err)
+		}
 	}
 }

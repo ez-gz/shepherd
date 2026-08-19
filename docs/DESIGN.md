@@ -15,9 +15,16 @@ Shepherd V0 therefore optimizes one loop:
 5. Detach back to the global view without stopping anything.
 
 Durable workstreams now organize that loop without changing its execution
-substrate. Structured signals and richer orchestration remain future observers
-and callers of the same controller actions—not prerequisites for using the
-dashboard.
+substrate. New sessions also install bounded runner-native status publishers;
+richer orchestration remains a future caller of the same controller actions,
+not a prerequisite for using the dashboard.
+
+A workstream is an outcome-oriented bundle rather than a pipeline node. It owns
+one or more registered directory roots, any number of durable sessions launched
+through those routes, and a local artifact directory for shared notes and
+files. This lets development, testing, QA, and review sessions span multiple
+repositories while remaining one piece of work. Humans and future authorized
+LLM callers operate that same topology through the same controller actions.
 
 ## Research synthesis
 
@@ -88,8 +95,9 @@ flowchart LR
     T --> SH["native no-agent shell"]
     C -. "future typed caller" .-> M["manager agent"]
     S -. "future replacement" .-> D["daemon / MCP queue"]
-    C -. "future observer" .-> O["structured runner events"]
-    A -. "future observer" .-> O
+    P1 --> O["bounded native status"]
+    P2 --> O
+    O --> S
 ```
 
 The package boundaries are:
@@ -110,8 +118,12 @@ The package boundaries are:
   versioned atomic store;
 - `internal/control`: the sole join between durable organization and current
   runtime observation, including the closed typed actor/scope command plane;
-- `internal/runner`: tiny Codex and Claude argv adapters plus the exec wrapper;
-- `internal/supervisor`: the tmux implementation;
+- `internal/runner`: Codex and Claude argv adapters, launch-time native-status
+  instrumentation, and the exec wrapper;
+- `internal/supervisor`: the tmux implementation and ephemeral native-status
+  transport;
+- `internal/autotitle`: the optional, single-purpose GPT-5.6 Luna Responses
+  client used by the dashboard;
 - `internal/transcript`: the read-only observer for what a native runner
   recorded about a session — the whole conversation as turns, and the tail of it
   as the one thing the session was last doing;
@@ -275,8 +287,9 @@ controller exposes now has a CLI verb, so an ordinary agent running in
 `~/.shepherd` can maintain Shepherd's durable state through the same typed command
 plane the dashboard uses. Its instructions are embedded in the binary and
 installed as `AGENTS.md`, a `CLAUDE.md` pointer, and
-`skills/manage-shepherd/SKILL.md`; existing files are never overwritten, so user
-edits survive an upgrade and `shepherd init --force` is the explicit refresh.
+`skills/manage-shepherd/SKILL.md`. The human onboarding guide is installed beside
+them as `QUICKSTART.md`. Existing files are never overwritten, so user edits
+survive an upgrade and `shepherd init --force` is the explicit refresh.
 
 A new installation is seeded with a `shepherd-managers` workstream rooted only at
 the home directory, so a pilot can be launched from the dashboard without
@@ -287,6 +300,14 @@ resurrected one the user deleted on purpose, and a separate provisioning marker
 would have been a second source of truth for a question the state file already
 answers. An installation that already has state is never seeded implicitly;
 `shepherd init` is the explicit opt-in and the way back after a deletion.
+
+`shepherd quickstart` is a normal titled Claude session, not a special runner.
+It starts in the Shepherd home, reads `QUICKSTART.md` through a small pointer
+prompt, and joins `shepherd-managers` when that workstream exists. On a fresh
+installation the workstream is provisioned before the session is recorded;
+otherwise the session's first durable write would consume the one-time marker
+and suppress provisioning. After detach, the dashboard still uses the command's
+original working directory as the project launch root.
 
 A pilot receives no authority. It shells out to `shepherd` and is therefore the local
 human at that boundary, holding no grant and leaving `localHumanAuthorizer`
@@ -304,8 +325,9 @@ directory a coherent working root for an agent that maintains Shepherd's own
 state: it can see its instructions, its notes, and its artifacts without being
 handed three unrelated paths.
 
-State schema v2 adds the optional durable session title, and v3 the optional
-native runner conversation. The loader applies explicit ordered migrations, one
+State schema v2 adds the optional durable session title, v3 the optional native
+runner conversation, and v4 a dense position on named-workstream membership.
+The loader applies explicit ordered migrations, one
 adjacent version at a time: it strictly validates the claimed older shape,
 migrates in memory, and atomically installs the current version while preserving
 the domain revision. Each superseded version keeps its own decoder, so a file
@@ -313,12 +335,18 @@ claiming v2 rejects the v3 `conversation` field rather than absorbing it and
 writing it back stripped. Invalid states, future versions, and fields unknown to
 the claimed schema are rejected rather than rewritten.
 
-Both migrations are schema-only and back-fill nothing. Back-filling the
+The first two migrations are schema-only and back-fill nothing. Back-filling the
 conversation would be *possible* for Claude — the durable id is the conversation
 id — and is deliberately not done, because a v2 record cannot distinguish a
 session that ran from one whose launch failed before Claude wrote anything. The
 result would be registrations that resume nothing while carrying the same
 provenance as ones that work.
+
+The v3-to-v4 migration installs newest-created-first membership positions, with
+`JoinedAt` and legacy slice order as deterministic tie-breakers. It preserves
+the domain revision. Once migrated, new and moved-in members append and every
+removal compacts the source positions.
+
 The workstream array order is also its durable display order; moving an active
 workstream swaps it with an active neighbor in one atomic state mutation and
 does not require a separate position field or schema migration.
@@ -330,7 +358,8 @@ The deliberately small durable model is:
 - `SessionRecord`: caller-owned launch ID, optional user-authored display title,
   backend, initial prompt/root, creation time, launch intent/binding, durable
   terminal outcome, and the optional native runner conversation; and
-- `Membership`: one optional active-workstream membership per durable session.
+- `Membership`: one optional active-workstream membership per durable session,
+  with a dense zero-based position inside that workstream.
 
 ## Runner conversations, and why they carry a provenance
 
@@ -384,6 +413,14 @@ provenance for the same reason: a caller that could supply either could assert
 an unverified conversation as fact, and being unassertable is the whole value of
 the field.
 
+Codex continuation also has an ownership rule. Under the same cross-process
+lifecycle lock, resume first finds every live durable session registered to the
+conversation. A sole owner receives the message through its existing pane; an
+unowned conversation starts `codex resume`; multiple owners fail closed. A new
+branch is never an accidental resume side effect: `shepherd fork` explicitly
+launches `codex fork`, and the new runner-minted conversation remains
+unregistered until it can be observed. Shepherd never edits Codex lock files.
+
 Starting a session is ordered as follows:
 
 1. The controller allocates `SessionRecord.id`.
@@ -406,6 +443,7 @@ The runtime layer derives only states tmux can prove:
 | `attached` | live session has one or more tmux clients |
 | `exited` | pane is dead; status may be known zero or unavailable |
 | `failed` | pane is dead with nonzero status |
+| `degraded` | a canonical Shepherd pane exists, but required metadata is malformed |
 
 `pane_dead_time` freezes runtime for exited sessions. `window_activity` provides
 a coarse terminal-activity timestamp on tmux versions where no reliable
@@ -418,9 +456,15 @@ The controller conservatively joins those observations to durable records:
 | durable ID plus matching live pane | `live` |
 | durable ID plus matching dead retained pane and known status | record `exited` and exit code |
 | durable ID plus matching dead retained pane without status | project exited with unknown outcome; do not record success |
+| durable ID plus degraded pane metadata | project `degraded`; do not rewrite binding or outcome |
 | explicit stop whose tmux kill succeeds | record `stopped` |
 | durable ID, no pane, no terminal outcome | `unavailable` |
 | pane carrying an unknown durable ID | `orphaned` and excluded from membership |
+
+Degraded panes remain visible and available for capture, attach, and stop. Input
+injection and adoption fail closed until their metadata is readable. The same
+observation health feeds `shepherd doctor --deep`; no runtime-health detail is
+written into `state.json` or a diagnostic log.
 
 Tmux 3.3/3.4 can retain a dead pane while omitting `pane_dead_status`. That is
 positive evidence that the process ended, but not evidence of success: the
@@ -447,6 +491,24 @@ lifecycle lock spans each launch and deletion, preventing concurrent dashboard
 or CLI processes from deleting a pending identity while its tmux runtime is
 created.
 
+### Native runner status
+
+Native status is presentation metadata, independent of the runtime lifecycle
+above. It is installed only at process launch and never written to
+`SessionRecord` or derived from pane contents.
+
+- Claude starts with a session-local `--settings` layer. Its status line
+  publishes model, effort, context, token and cost metrics; hooks publish
+  `Ready`, `Working`, `Needs input`, `Error`, or `Done`.
+- Codex starts with a session-local `tui.terminal_title` override. The supervisor
+  accepts the pane title only when the same launch marked that pane.
+- Claude values travel in base64 pane options. Both transports are sanitized to
+  one line and capped at 240 runes at their write and read boundaries.
+
+The `status` brief source projects this value as proven text in the runner's
+color, before transcript-derived activity. Existing sessions retain their old
+launch contract; no dashboard refresh rewrites a live runner.
+
 ### Follow-up messages
 
 Messages never enter a shell command constructed by Shepherd. It:
@@ -457,8 +519,10 @@ Messages never enter a shell command constructed by Shepherd. It:
 3. deletes the buffer; and
 4. sends the `Enter` key separately.
 
-Delivery is refused for a dead pane, a pane in copy/scroll mode, or a pane whose
-input is disabled. The selected terminal preview remains visible because an
+Prompts and follow-ups are rejected above 64 KiB before durable storage, argv
+construction, or tmux input. Delivery is refused for a dead pane, a degraded
+pane, a pane in copy/scroll mode, or a pane whose input is disabled. The
+selected terminal preview remains visible because an
 alive process might currently be showing an approval dialog rather than its
 normal composer. In a `no-agent` pane the destination is intentionally an
 interactive shell, so that shell interprets follow-up text after delivery.
@@ -541,8 +605,9 @@ Organize actions are contextual chords on that same list. Each carries a verb
 and reads the selected row for its noun: `Ctrl-R` renames a workstream or edits
 a durable session title, `Ctrl-T` marks a session and then moves it into the
 next selected workstream (explicitly adopting an orphan when that is what it
-is), and `Shift-Up`/`Shift-Down` either reorders a named workstream durably or
-walks a session to the adjacent workstream with Ungrouped pinned last.
+is), and `Shift-Up`/`Shift-Down` reorders either a named workstream or a member
+session durably. Membership changes remain the explicit `Ctrl-T` operation;
+Ungrouped retains its live/newest projection.
 `Ctrl-N` creates a workstream rooted at the launch directory, and `Ctrl-O`
 edits the selected workstream's roots.
 
@@ -645,21 +710,21 @@ differently.
 
 It has two slots. The lead is always rendered; the detail sits behind a `↳` and
 yields first when the row is narrow. Each slot is an ordered list of **sources**
-and takes the first with something to say — today title, initial task, then
-runner for the lead, and runner activity, latest-via-Shepherd, then initial task
-for the detail. A source already spent on the lead is skipped in the detail,
+and takes the first with something to say — today durable title, optional
+automatic title, initial task, then runner for the lead; and native status,
+runner activity, latest-via-Shepherd, then initial task for the detail. A source
+already spent on the lead is skipped in the detail,
 which is the whole of the rule that used to be written out as "show the initial
 task as detail, but only when a title exists".
 
-The sources divide into two kinds, and the division is what the package is
-shaped around. Four of them restate something Shepherd already holds: a title, a
-prompt, a message it sent, a runner's name. One of them, **activity**, goes and
-looks: it reads the tail of the transcript the runner is already writing and
+The sources divide by provenance. Titles, prompts, sent messages and runner
+names restate something Shepherd already holds. **Status** is a bounded direct
+runner publication projected through tmux, so it is proven. **Activity** goes
+and looks: it reads the tail of the transcript the runner is already writing and
 reports the last record — a tool call, or the first line of a finished reply.
-That is the first built-in that observes the agent rather than repeating what
-the user said to it, and it is why the detail slot defaults to it first. A row's
-lead already answers "which session is this?"; putting the latest message first
-in the detail answered the same question twice.
+It is the fallback observation after direct native status. A row's lead already
+answers "which session is this?"; putting the latest message first in the detail
+answered the same question twice.
 
 Two properties are load-bearing:
 
@@ -683,10 +748,9 @@ Two properties are load-bearing:
 The activity source draws one line that the transcript cannot support, and does
 not cross it. A tool call with no result after it is reported as `running`,
 never as blocked or waiting, because the record is identical whether the command
-is executing or sitting behind an approval prompt. Nothing it produces reaches
-the status column either: that column is the runtime lifecycle, and the semantic
-agent turn state in [`todos/session-status-titles.md`](../todos/session-status-titles.md)
-needs a signal about *now* rather than a reading of the most recent record.
+is executing or sitting behind an approval prompt. Nothing it produces becomes
+native status either: that value comes from the runner's launch-time publisher
+and never from a reading of the most recent record.
 [`todos/runner-activity.md`](../todos/runner-activity.md) records what each
 runner actually exposes, including the signal that would support that column.
 
@@ -741,16 +805,20 @@ nothing rather than reaching further back for something that is no longer true.
 
 Commands are told which session through `SHEPHERD_SESSION_*` variables and are
 never given the prompt or messages. Wanting a status line in a row is not a
-reason to hand what someone typed to another program on a timer, and the same
-rule keeps prompts out of the planned diagnostic log.
+reason to hand what someone typed to another program on a timer. The on-demand
+deep doctor does not read them, and Shepherd deliberately keeps no diagnostic
+log.
 
 Shepherd is the contract layer here, not the implementation. It defines what a
 source is asked, what it may return, how often it runs, and how its answer is
-marked; what a source does to produce that line is the user's business. A brief
-written by a model therefore needs no code in this repository — it is a program
-that reads `SHEPHERD_SESSION_*` and prints a line. Building one in would have
-added the first network call and the first API-key handling anywhere in Shepherd,
-and a second way to do what the generic source already does.
+marked; what a source does to produce that line is the user's business. A
+configured brief written by a model therefore needs no special command-source
+code in this repository — it is a program that reads `SHEPHERD_SESSION_*` and
+prints a line. Automatic titles are deliberately different: an explicit
+top-level opt-in allows one asynchronous `gpt-5.6-luna` call over the first
+runner-declared completed-turn output. The result is process-local, never
+rewrites durable state, and is skipped before transcript access when
+`OPENAI_API_KEY` is absent. A human title always wins.
 
 Dashboard navigation uses one typed primary-screen state plus a typed help
 overlay and typed composer edit modes. A single indexed overview read model
@@ -798,12 +866,11 @@ directory per task. It should never be silently bundled into the dashboard.
 
 ## Next iterations
 
-1. Add structured runner observers and a real `needs input` priority state.
-2. Add notifications for blocked, exited, failed, and unavailable transitions.
+1. Add returned/seen attention state from stable native completion identities.
+2. Add notifications for needs-input, exited, failed, and unavailable transitions.
 3. Add safe worktree spawn policies and conflict visibility.
 4. Add pin, filter, tags, and richer workstream notes as projections.
-5. Add model/token/cost telemetry only from authoritative runner events.
-6. Move from one-second polling to tmux control mode or a daemon only when scale
+5. Move from one-second polling to tmux control mode or a daemon only when scale
    or latency makes that measurable.
 
 ## Testing contract
@@ -817,13 +884,20 @@ The automated suite covers:
 - literal prompts/messages containing shell-looking syntax;
 - strict JSON settings, context-aware composer bindings, and exact configured
   argv transport through the trusted resolver;
-- strict v1-to-v2 and v2-to-v3 state migration fixtures, durable title and
-  conversation validation, superseded decoders refusing a newer schema's fields,
-  and unchanged domain revisions for schema-only migration;
+- strict v1-to-v2, v2-to-v3, and v3-to-v4 state migration fixtures; durable
+  title, conversation, and dense membership-position validation; superseded
+  decoders refusing a newer schema's fields; and unchanged domain revisions
+  during migration;
 - conversation registration: assigned at launch for Claude without consulting
   any file, absent for a fresh Codex session, observed only on a unique
   directory/window/prompt match, refused on ambiguity, idempotent once written,
-  and carried to the runtime boundary by resume as literal argv;
+  carried to the runtime boundary by resume as literal argv, single live Codex
+  ownership, and explicit fork argv;
+- session-local Claude hooks/status lines and Codex title instrumentation,
+  marked transport acceptance, base64 metadata, and 240-rune sanitization;
+- interactive launches removing only `NO_COLOR` while retaining credentials;
+- automatic-title opt-in, no-key short circuit, one asynchronous Luna attempt,
+  first-completed-turn parsing, human-title precedence, and no durable rewrite;
 - closed command actor/scope validation and local-human authorization;
 - machine-readable list/spawn/send projections with optional known exit codes;
 - brief slot resolution, separate lead/detail truncation budgets, unproven-source

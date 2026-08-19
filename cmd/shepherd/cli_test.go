@@ -132,6 +132,7 @@ func TestRefusalsNeverReachForAController(t *testing.T) {
 		{"peek takes exactly one session", []string{"peek"}, "usage: shepherd peek"},
 		{"history takes exactly one session", []string{"history"}, "usage: shepherd history"},
 		{"resume requires a message", []string{"resume", testSessionID}, "usage: shepherd resume"},
+		{"fork requires a message", []string{"fork", testSessionID}, "usage: shepherd fork"},
 		{"conversation takes exactly one session", []string{"conversation"}, "usage: shepherd conversation"},
 		{"history refuses a negative count", []string{"history", testSessionID, "--last", "-1"}, "cannot be negative"},
 		{"delete demands confirmation", []string{"delete", testSessionID}, "pass --yes to confirm"},
@@ -140,6 +141,8 @@ func TestRefusalsNeverReachForAController(t *testing.T) {
 		{"title refuses two intents at once", []string{"title", testSessionID, "--clear", "new"}, "not both"},
 		{"move demands a destination", []string{"move", testSessionID}, "usage: shepherd move"},
 		{"move refuses two destinations", []string{"move", testSessionID, "-w", "Parser", "--ungrouped"}, "usage: shepherd move"},
+		{"reorder requires a direction", []string{"reorder", testSessionID}, "--up|--down"},
+		{"reorder refuses both directions", []string{"reorder", testSessionID, "--up", "--down"}, "--up|--down"},
 		{"ws create requires a name", []string{"ws", "create"}, "usage: shepherd ws create"},
 		{"ws rename requires a new name", []string{"ws", "rename", "Parser"}, "usage: shepherd ws rename"},
 		{"ws reorder requires a direction", []string{"ws", "reorder", "Parser"}, "--up|--down"},
@@ -184,11 +187,13 @@ func TestFlagsAreAcceptedAfterPositionals(t *testing.T) {
 		{"ws root add", []string{"ws", "root", "add", "Parser", "/tmp/extra", "--json"}},
 		{"title", []string{"title", testSessionID, "a new title", "--json"}},
 		{"move", []string{"move", testSessionID, "--ungrouped"}},
+		{"reorder", []string{"reorder", testSessionID, "--up"}},
 		{"adopt", []string{"adopt", testSessionID, "-w", "Parser"}},
 		{"delete", []string{"delete", testSessionID, "--yes"}},
 		{"peek", []string{"peek", testSessionID, "--lines", "10"}},
 		{"history", []string{"history", testSessionID, "--last", "5"}},
 		{"send", []string{"send", testSessionID, "carry on", "--json"}},
+		{"fork", []string{"fork", testSessionID, "branch here", "--json"}},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			h := newHarness(t)
@@ -225,6 +230,8 @@ func TestJSONResultsCarryTheKeysThePilotReads(t *testing.T) {
 			[]string{"status", "session_id", "title"}},
 		{"move", []string{"move", testSessionID, "--ungrouped", "--json"},
 			[]string{"status", "session_id", "workstream_id"}},
+		{"reorder", []string{"reorder", testSessionID, "--up", "--json"},
+			[]string{"status", "session_id", "moved"}},
 		{"adopt", []string{"adopt", testSessionID, "--json"},
 			[]string{"status", "session_id", "workstream_id"}},
 		{"delete", []string{"delete", testSessionID, "--yes", "--json"},
@@ -235,6 +242,8 @@ func TestJSONResultsCarryTheKeysThePilotReads(t *testing.T) {
 			[]string{"session_id", "state", "capture", "capture_is_current_frame_only"}},
 		{"history", []string{"history", testSessionID, "--json"},
 			[]string{"session_id", "runner", "availability", "total_turns", "turns"}},
+		{"fork", []string{"fork", testSessionID, "branch here", "--json"},
+			[]string{"id", "runner", "state", "forked_from", "source_conversation_id"}},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			h := newHarness(t)
@@ -301,6 +310,24 @@ func TestListJSONReportsTheWholeSnapshot(t *testing.T) {
 	}
 	if len(snapshot.Workstreams) != 1 || snapshot.Workstreams[0].ArtifactDir == "" {
 		t.Errorf("workstreams = %+v, want one carrying its artifact directory", snapshot.Workstreams)
+	}
+}
+
+func TestSessionReorderMapsDirectionAndReportsBoundary(t *testing.T) {
+	h := newHarness(t)
+	capturedID, capturedDelta := "", 0
+	h.service.ReorderSessionFunc = func(_ context.Context, id string, delta int) (bool, error) {
+		capturedID, capturedDelta = id, delta
+		return false, nil
+	}
+	if err := h.app.run([]string{"reorder", testSessionID, "--down"}); err != nil {
+		t.Fatal(err)
+	}
+	if capturedID != testSessionID || capturedDelta != 1 {
+		t.Fatalf("reorder call = (%q, %d), want (%q, 1)", capturedID, capturedDelta, testSessionID)
+	}
+	if !strings.Contains(h.out.String(), "already at the edge") {
+		t.Fatalf("boundary output = %q", h.out.String())
 	}
 }
 
@@ -660,6 +687,54 @@ func TestResumeReportsTheConversationItContinuedAndTheSessionItMade(t *testing.T
 	}
 	if !strings.Contains(output, format.ShortID(resumedID)) {
 		t.Errorf("output = %q, want it to name the new session", output)
+	}
+}
+
+func TestResumeReportsWhenItSentToTheExistingCodexOwner(t *testing.T) {
+	h := newHarness(t)
+	h.service.FindFunc = func(context.Context, string) (control.Session, error) {
+		return control.Session{ID: testSessionID, Backend: shepherd.BackendCodex, Durable: true}, nil
+	}
+	h.service.ResumeSessionFunc = func(_ context.Context, _, prompt string) (control.Session, error) {
+		if prompt != "carry on" {
+			t.Fatalf("prompt = %q", prompt)
+		}
+		return control.Session{
+			ID: testSessionID, Backend: shepherd.BackendCodex, Status: control.StatusLive,
+			Durable: true, ContinuedExisting: true,
+			Record: workstream.SessionRecord{ID: testSessionID, Conversation: &workstream.Conversation{
+				ID: "019e6d0c-14bd-7792-91d2-f684a8dc6e80", Source: workstream.ConversationObserved,
+			}},
+		}, nil
+	}
+
+	if err := h.app.run([]string{"resume", testSessionID, "carry on"}); err != nil {
+		t.Fatal(err)
+	}
+	if output := h.out.String(); !strings.Contains(output, "sent to live codex owner") || strings.Contains(output, "resumed codex conversation") {
+		t.Fatalf("output = %q", output)
+	}
+}
+
+func TestForkCarriesTheSourceAndPromptToTheExplicitControllerAction(t *testing.T) {
+	h := newHarness(t)
+	const forkedID = "018f0000-0000-4000-8000-0000000000f4"
+	h.service.ForkSessionFunc = func(_ context.Context, id, prompt string) (control.Session, error) {
+		if id != testSessionID || prompt != "try the other parser" {
+			t.Fatalf("fork = id %q prompt %q", id, prompt)
+		}
+		return control.Session{ID: forkedID, Backend: shepherd.BackendCodex, Status: control.StatusLive, Durable: true}, nil
+	}
+	h.service.RegisterConversationFunc = func(context.Context, string) (workstream.Conversation, error) {
+		return workstream.Conversation{ID: "019e6d0c-14bd-7792-91d2-f684a8dc6e80", Source: workstream.ConversationObserved}, nil
+	}
+
+	if err := h.app.run([]string{"fork", testSessionID, "try", "the", "other", "parser"}); err != nil {
+		t.Fatal(err)
+	}
+	output := h.out.String()
+	if !strings.Contains(output, "forked codex conversation") || !strings.Contains(output, format.ShortID(forkedID)) {
+		t.Fatalf("output = %q", output)
 	}
 }
 

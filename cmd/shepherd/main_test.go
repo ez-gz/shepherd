@@ -2,15 +2,19 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/ez-gz/shepherd/internal/config"
 	"github.com/ez-gz/shepherd/internal/control"
+	"github.com/ez-gz/shepherd/internal/control/controltest"
 	"github.com/ez-gz/shepherd/internal/format"
 	"github.com/ez-gz/shepherd/internal/shepherd"
 	"github.com/ez-gz/shepherd/internal/workstream"
@@ -89,12 +93,13 @@ func TestHelpAdvertisesQuickstart(t *testing.T) {
 	var output bytes.Buffer
 	printHelp(&output)
 	for _, want := range []string{
-		"shepherd quickstart [-r claude|codex] [-C DIR]",
+		"shepherd quickstart                    launch Claude in ~/.shepherd",
 		"shepherd list [--json]",
+		"shepherd doctor [--deep]",
 		"Ctrl-G            resize snapshot/context",
 		"Ctrl-R            rename a workstream or edit/clear a session title",
 		"Ctrl-T            mark a session; Ctrl-T on a workstream moves or adopts it",
-		"Shift-↑/↓         reorder a workstream, or move a session to the next one",
+		"Shift-↑/↓         reorder a workstream or a session within its workstream",
 		"Ctrl-C            quit the dashboard; Esc never quits",
 	} {
 		if !strings.Contains(output.String(), want) {
@@ -103,44 +108,14 @@ func TestHelpAdvertisesQuickstart(t *testing.T) {
 	}
 }
 
-func TestQuickstartBackendPrefersClaudeAndRejectsNoAgent(t *testing.T) {
-	settings := config.Default()
-	settings.Commands[string(shepherd.BackendClaude)] = []string{"/bin/sh"}
-	settings.Commands[string(shepherd.BackendCodex)] = []string{"/bin/sh"}
-	backend, err := quickstartBackend("", settings)
-	if err != nil {
-		t.Fatal(err)
+func TestQuickstartPromptPointsAtInstalledDocument(t *testing.T) {
+	document := "/tmp/shepherd home/QUICKSTART.md"
+	prompt := quickstartPrompt(document)
+	if !strings.Contains(prompt, document) {
+		t.Fatalf("quickstart prompt %q does not point at %q", prompt, document)
 	}
-	if backend != shepherd.BackendClaude {
-		t.Fatalf("quickstart backend = %q, want claude", backend)
-	}
-	if _, err := quickstartBackend("no-agent", settings); err == nil || !strings.Contains(err.Error(), "requires") {
-		t.Fatalf("no-agent quickstart error = %v", err)
-	}
-}
-
-func TestQuickstartBackendFallsBackToCodex(t *testing.T) {
-	settings := config.Default()
-	settings.Commands[string(shepherd.BackendClaude)] = []string{"/definitely/missing/shepherd-claude"}
-	settings.Commands[string(shepherd.BackendCodex)] = []string{"/bin/sh"}
-	backend, err := quickstartBackend("", settings)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if backend != shepherd.BackendCodex {
-		t.Fatalf("quickstart fallback = %q, want codex", backend)
-	}
-	if _, err := quickstartBackend("claude", settings); err == nil {
-		t.Fatal("explicit missing Claude runner did not fail")
-	}
-}
-
-func TestQuickstartPromptEmbedsCanonicalSkill(t *testing.T) {
-	prompt := strings.Join(strings.Fields(quickstartPrompt()), " ")
-	for _, want := range []string{"name: learn-shepherd", "If this guide itself is running inside a Shepherd session", "press `Ctrl-T` to mark it", "Ctrl-b", "Ctrl-G", "Shift-Up", "Ctrl-N"} {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("quickstart prompt is missing %q", want)
-		}
+	if len(prompt) >= 512 {
+		t.Fatalf("quickstart prompt is %d bytes; it should remain a small file pointer", len(prompt))
 	}
 }
 
@@ -149,6 +124,100 @@ func TestQuickstartHelpReturnsSuccess(t *testing.T) {
 	application := &app{out: &output, err: &output, workdir: func() string { return t.TempDir() }}
 	if err := application.runQuickstart([]string{"-h"}); err != nil {
 		t.Fatalf("quickstart help: %v", err)
+	}
+}
+
+func TestLaunchQuickstartSeedsFirstInstallBeforeStartingTitledClaude(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), ".shepherd")
+	t.Setenv("SHEPHERD_HOME", dir)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	store := workstream.FileStore{
+		Path: filepath.Join(dir, "state.json"), Artifacts: filepath.Join(dir, "workstreams"),
+	}
+	now := time.Now()
+	manager := workstream.Workstream{
+		ID: testWorkstreamID, Name: ManagersWorkstreamName, Description: managersWorkstreamDescription,
+		ArtifactDir: filepath.Join(store.Artifacts, testWorkstreamID), Roots: []string{dir},
+		Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	var events []string
+	var workstreams []workstream.Workstream
+	var started control.StartRequest
+	var title string
+	service := &controltest.Stub{
+		CreateWorkstreamFunc: func(_ context.Context, name, description string, roots []string) (workstream.Workstream, error) {
+			events = append(events, "create-workstream")
+			if name != ManagersWorkstreamName || description != managersWorkstreamDescription || len(roots) != 1 || roots[0] != dir {
+				t.Fatalf("manager workstream = %q, %q, %v", name, description, roots)
+			}
+			workstreams = append(workstreams, manager)
+			if err := os.WriteFile(store.Path, []byte("first durable write"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return manager, nil
+		},
+		SnapshotFunc: func(context.Context) (control.Snapshot, error) {
+			events = append(events, "snapshot")
+			return control.Snapshot{Workstreams: workstreams}, nil
+		},
+		StartFunc: func(_ context.Context, request control.StartRequest) (control.Session, error) {
+			events = append(events, "start")
+			started = request
+			return control.Session{ID: testSessionID}, nil
+		},
+		SetSessionTitleFunc: func(_ context.Context, id, value string) error {
+			events = append(events, "title")
+			if id != testSessionID {
+				t.Fatalf("titled session %q, want %q", id, testSessionID)
+			}
+			title = value
+			return nil
+		},
+	}
+
+	if _, err := launchQuickstart(context.Background(), service, store, dir, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Join(events, ","), "create-workstream,snapshot,start,title"; got != want {
+		t.Fatalf("quickstart events = %q, want %q", got, want)
+	}
+	if started.Backend != shepherd.BackendClaude || started.Root != dir || started.WorkstreamID != testWorkstreamID {
+		t.Fatalf("quickstart request = %+v", started)
+	}
+	if !strings.Contains(started.Prompt, filepath.Join(dir, quickstartDocumentName)) || len(started.Prompt) >= 512 {
+		t.Fatalf("quickstart prompt = %q", started.Prompt)
+	}
+	if title != "Quickstart" {
+		t.Fatalf("quickstart title = %q", title)
+	}
+}
+
+func TestLaunchQuickstartDoesNotRecreateManagersWorkstreamAfterFirstStartup(t *testing.T) {
+	dir := t.TempDir()
+	store := workstream.FileStore{Path: filepath.Join(dir, "state.json"), Artifacts: filepath.Join(dir, "workstreams")}
+	if err := os.WriteFile(store.Path, []byte("existing durable state"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	created := false
+	service := &controltest.Stub{
+		CreateWorkstreamFunc: func(context.Context, string, string, []string) (workstream.Workstream, error) {
+			created = true
+			return workstream.Workstream{}, nil
+		},
+		StartFunc: func(_ context.Context, request control.StartRequest) (control.Session, error) {
+			if request.WorkstreamID != "" {
+				t.Fatalf("quickstart joined unexpected workstream %q", request.WorkstreamID)
+			}
+			return control.Session{ID: testSessionID}, nil
+		},
+	}
+	if _, err := launchQuickstart(context.Background(), service, store, dir, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if created {
+		t.Fatal("quickstart recreated the managers workstream after first startup")
 	}
 }
 
@@ -170,6 +239,51 @@ func TestSupportedTmuxVersion(t *testing.T) {
 			t.Errorf("supportedTmuxVersion(%q) = (%v, %v), want (%v, %v)",
 				test.value, supported, known, test.supported, test.known)
 		}
+	}
+}
+
+func TestDeepDoctorAcceptsFreshPrivateInstallWithoutRunningServer(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	root := filepath.Join(t.TempDir(), "shepherd-home")
+	store := workstream.FileStore{
+		Path: filepath.Join(root, "state.json"), Artifacts: filepath.Join(root, "workstreams"),
+	}
+	var output bytes.Buffer
+	if failed := deepDoctorFailed(&output, filepath.Join(root, "config.json"), store, "shepherd-doctor-fresh-test"); failed {
+		t.Fatalf("fresh deep doctor failed:\n%s", output.String())
+	}
+	for _, want := range []string{"[ok]      state", "[ok]      lock", "socket  inactive"} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("deep doctor output lacks %q:\n%s", want, output.String())
+		}
+	}
+}
+
+func TestDoctorPrivatePathRejectsBroadPermissionsAndSymlinks(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "state.json")
+	if err := os.WriteFile(path, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	check := doctorPermission{label: "state", path: path}
+	if !doctorPrivatePath(&output, check) {
+		t.Fatalf("private file rejected: %s", output.String())
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if doctorPrivatePath(io.Discard, check) {
+		t.Fatal("world-readable state file accepted")
+	}
+	link := filepath.Join(root, "linked-state.json")
+	if err := os.Symlink(path, link); err != nil {
+		t.Fatal(err)
+	}
+	if doctorPrivatePath(io.Discard, doctorPermission{label: "state", path: link}) {
+		t.Fatal("state symlink accepted")
 	}
 }
 
@@ -203,6 +317,7 @@ func TestMachineSnapshotIncludesDurableTitleAndHonestUnknownExit(t *testing.T) {
 	runtime := shepherd.Session{
 		ID: id, Name: "shepherd-" + id, Backend: shepherd.BackendCodex,
 		Status: shepherd.StatusExited, ExitCode: nil, StartedAt: time.Now().Add(-time.Minute),
+		NativeStatus: "Done · gpt-5.6-codex · 42% ctx",
 	}
 	snapshot := control.Snapshot{
 		Revision:    9,
@@ -224,6 +339,9 @@ func TestMachineSnapshotIncludesDurableTitleAndHonestUnknownExit(t *testing.T) {
 	}
 	if session.ExitCode != nil || session.State != "exited" {
 		t.Fatalf("unknown exit projection = stable state %q code %#v", session.State, session.ExitCode)
+	}
+	if session.NativeStatus != runtime.NativeStatus {
+		t.Fatalf("native status = %q, want %q", session.NativeStatus, runtime.NativeStatus)
 	}
 
 	var output bytes.Buffer
@@ -247,6 +365,20 @@ func TestMachineSnapshotIncludesDurableTitleAndHonestUnknownExit(t *testing.T) {
 	}
 	if exitCode, exists := decodedSession["exit_code"]; !exists || exitCode != nil {
 		t.Fatalf("unknown exit_code = %#v (present %v), want explicit null", exitCode, exists)
+	}
+}
+
+func TestMachineSnapshotIncludesDegradedReason(t *testing.T) {
+	runtime := shepherd.Session{
+		ID: "damaged-runtime", Name: "damaged-runtime", Status: shepherd.StatusLive,
+		ObservationError: "invalid Shepherd runtime identity metadata",
+	}
+	machine := newCLISnapshot(control.Snapshot{Orphans: []control.Session{{
+		ID: runtime.ID, Status: control.StatusDegraded, Orphaned: true, Runtime: &runtime,
+	}}})
+	if len(machine.Sessions) != 1 || machine.Sessions[0].State != "degraded" ||
+		machine.Sessions[0].DegradedReason != runtime.ObservationError {
+		t.Fatalf("degraded machine projection = %#v", machine.Sessions)
 	}
 }
 

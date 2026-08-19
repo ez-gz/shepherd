@@ -22,6 +22,10 @@ import (
 type Launch struct {
 	Prompt string
 	Title  string
+	// Callback is the Shepherd executable a runner may invoke for session-local
+	// instrumentation. It is an absolute path in real launches; tests and other
+	// adapter callers may leave it empty, in which case "shepherd" is used.
+	Callback string
 	// SessionID is Shepherd's durable id for the session being started. Claude
 	// accepts it as its own conversation id, which is what makes a fresh Claude
 	// session's conversation known without asking anyone.
@@ -30,10 +34,14 @@ type Launch struct {
 	// Empty starts fresh. When it is set the runner, not Shepherd, owns the
 	// resulting conversation id — it is the id being resumed.
 	Resume string
+	// Fork branches Resume into a new native conversation instead of attaching
+	// another writer to it. It is meaningful only when Resume is non-empty.
+	Fork bool
 }
 
 // Resuming reports whether this launch continues an existing conversation.
 func (l Launch) Resuming() bool { return strings.TrimSpace(l.Resume) != "" }
+func (l Launch) Forking() bool  { return l.Resuming() && l.Fork }
 
 type Adapter interface {
 	Backend() shepherd.Backend
@@ -43,6 +51,7 @@ type Adapter interface {
 	// id. A runner that cannot must refuse the request rather than silently
 	// starting a fresh session that looks resumed.
 	SupportsResume() bool
+	SupportsFork() bool
 }
 
 type codexAdapter struct{}
@@ -52,15 +61,20 @@ func (codexAdapter) Binary() string {
 	return env.ValueOr(env.CodexBinary, "codex")
 }
 func (codexAdapter) SupportsResume() bool { return true }
+func (codexAdapter) SupportsFork() bool   { return true }
 
 // Arguments builds Codex argv. Codex has no flag for choosing a session id at
 // launch, so a fresh session carries no identity Shepherd chose; `codex resume`
 // takes the id Codex minted as a positional argument.
 func (codexAdapter) Arguments(launch Launch) []string {
-	if launch.Resuming() {
-		return []string{"resume", launch.Resume, "--", launch.Prompt}
+	instrumentation := []string{"-c", CodexTerminalTitleOverride}
+	if launch.Forking() {
+		return append(instrumentation, "fork", launch.Resume, "--", launch.Prompt)
 	}
-	return []string{"--", launch.Prompt}
+	if launch.Resuming() {
+		return append(instrumentation, "resume", launch.Resume, "--", launch.Prompt)
+	}
+	return append(instrumentation, "--", launch.Prompt)
 }
 
 type claudeAdapter struct{}
@@ -70,16 +84,24 @@ func (claudeAdapter) Binary() string {
 	return env.ValueOr(env.ClaudeBinary, "claude")
 }
 func (claudeAdapter) SupportsResume() bool { return true }
+func (claudeAdapter) SupportsFork() bool   { return true }
 
 // Arguments builds Claude argv. --session-id and --resume are mutually
 // exclusive: the first names a conversation to create, the second names one
 // that already exists, and passing both asks Claude to do two different things
 // with one identity.
 func (claudeAdapter) Arguments(launch Launch) []string {
-	if launch.Resuming() {
-		return []string{"--resume", launch.Resume, "--name", launch.Title, "--", launch.Prompt}
+	instrumentation := []string{"--settings", ClaudeSettings(launch.Callback)}
+	if launch.Forking() {
+		return append(instrumentation,
+			"--resume", launch.Resume, "--fork-session", "--name", launch.Title, "--", launch.Prompt)
 	}
-	return []string{"--session-id", launch.SessionID, "--name", launch.Title, "--", launch.Prompt}
+	if launch.Resuming() {
+		return append(instrumentation,
+			"--resume", launch.Resume, "--name", launch.Title, "--", launch.Prompt)
+	}
+	return append(instrumentation,
+		"--session-id", launch.SessionID, "--name", launch.Title, "--", launch.Prompt)
 }
 
 func AdapterFor(backend shepherd.Backend) (Adapter, error) {
@@ -159,7 +181,7 @@ func firstExecutable(candidates []string) (string, error) {
 // ExecEncoded is the hidden child-process entry point launched directly by
 // tmux. Prompt, title and resume target are encoded only to keep tmux argv
 // metadata compact; no value is ever evaluated by a shell.
-func ExecEncoded(backendValue, encodedPrompt, encodedTitle, encodedCommand, encodedResume string) error {
+func ExecEncoded(backendValue, encodedPrompt, encodedTitle, encodedCommand, encodedResume, forkValue string) error {
 	backend, err := shepherd.ParseBackend(backendValue)
 	if err != nil {
 		return err
@@ -183,10 +205,19 @@ func ExecEncoded(backendValue, encodedPrompt, encodedTitle, encodedCommand, enco
 	}
 	launch := Launch{
 		Prompt: prompt, Title: title,
-		SessionID: os.Getenv(env.SessionID), Resume: resume,
+		SessionID: os.Getenv(env.SessionID), Resume: resume, Fork: forkValue == "1",
+	}
+	if callback, callbackErr := os.Executable(); callbackErr == nil {
+		launch.Callback = callback
 	}
 	if launch.Resuming() && !adapter.SupportsResume() {
 		return fmt.Errorf("runner %s cannot resume a conversation", backend)
+	}
+	if launch.Forking() && !adapter.SupportsFork() {
+		return fmt.Errorf("runner %s cannot fork a conversation", backend)
+	}
+	if launch.Fork && !launch.Resuming() {
+		return errors.New("fork requires a conversation to branch")
 	}
 	command, err := DecodeCommand(encodedCommand)
 	if err != nil {
@@ -201,7 +232,23 @@ func ExecEncoded(backendValue, encodedPrompt, encodedTitle, encodedCommand, enco
 	}
 	args := append([]string{path}, command[1:]...)
 	args = append(args, adapter.Arguments(launch)...)
-	return syscall.Exec(path, args, os.Environ())
+	return syscall.Exec(path, args, interactiveEnvironment(os.Environ()))
+}
+
+// interactiveEnvironment removes only the conventional color opt-out from the
+// environment handed to an interactive coding agent. Shepherd's own process,
+// the user's shell, tmux's server environment, and every credential keep their
+// original values; a fresh slice is built for this one exec boundary.
+func interactiveEnvironment(environment []string) []string {
+	result := make([]string, 0, len(environment))
+	for _, entry := range environment {
+		name, _, _ := strings.Cut(entry, "=")
+		if name == "NO_COLOR" {
+			continue
+		}
+		result = append(result, entry)
+	}
+	return result
 }
 
 func Encode(value string) string {

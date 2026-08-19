@@ -91,18 +91,18 @@ func (m Model) renderHelp() string {
 func (m Model) helpContentLines() []string {
 	var lines []string
 	lines = appendHelpParagraph(lines, m.width,
-		"Shepherd—‘parallel’ in Japanese—is a local command center for parallel native coding agents. Workstreams provide durable organization while tmux owns terminals and current process observation. Closing the dashboard never stops a runtime.")
+		"Shepherd is a local command center for parallel native coding agents. Operate it directly here or ask an LLM to use the same guarded CLI. Workstreams provide durable organization while tmux owns terminals and current process observation. Closing the dashboard never stops a runtime.")
 
 	lines = appendHelpSection(lines, m.width, "Nouns")
 	for _, item := range []struct {
 		term        string
 		description string
 	}{
-		{"Workstream", "A durable project grouping with a name, registered roots, notes and artifacts, and zero or more sessions. It does not imply a manager or autonomy."},
+		{"Workstream", "A durable logical bundle for one outcome, with a name, registered roots, notes and artifacts, and zero or more sessions. Development, testing, QA, and review may all belong to it; it does not imply a manager or autonomy."},
 		{"Session", "A durable launch identity with an optional title, initial task, root, runner, and recorded outcome. It remains after its process stops."},
 		{"Runtime", "The tmux pane currently associated with a session. It supplies live process observations and may be live, retained after exit, or unavailable."},
-		{"Root", "An explicitly registered directory used as the working directory for a new launch. A workstream may have several."},
-		{"Runner", "The native program Shepherd launches: Codex, Claude, or a no-agent interactive shell."},
+		{"Root", "An explicitly registered directory route used as the working directory for a new launch. Several roots let one workstream span repositories."},
+		{"Runner", "The native program Shepherd launches: Codex, Claude, or a no-agent interactive shell. Codex and Claude commands may target compatible wrappers or variants."},
 		{"Composer", "The input bar at the bottom of the dashboard. Its prefix names the destination Enter commits to: a new session, or the live session it is aimed at."},
 		{"Brief", m.briefGlossaryDescription()},
 		{"Ungrouped", "Durable sessions that currently have no workstream membership."},
@@ -123,6 +123,8 @@ func (m Model) helpContentLines() []string {
 		{"↑ / ↓", "Select a workstream or session; in a multiline composer, move between its logical lines instead. The selection is held while a reply or a rename owns the composer, so the pane below keeps showing what is being answered."},
 		{"Option-↑ / Option-↓", "Jump to the previous or next workstream, passing over the sessions between. From inside a workstream the first press up lands on its own header. Both keep working while a multiline draft owns ↑ and ↓."},
 		{"PgUp / PgDn", "Move through the dashboard list one viewport at a time."},
+		{"Mouse click", "Select a workstream or session without attaching or acting on it. Click a workstream's disclosure triangle to collapse or expand it."},
+		{"Mouse wheel", "Move the dashboard list, settings, or help viewport. A pointer gesture disarms lifecycle and archive confirmations."},
 		{"← / → · empty", "Collapse or expand the selected workstream."},
 		{"← / → · text", "Move the composer cursor."},
 		{"Enter · empty", "Collapse a workstream, or attach to an available session runtime. Inactive while replying, so it cannot attach to a row other than the pinned target."},
@@ -161,7 +163,7 @@ func (m Model) helpContentLines() []string {
 		{"Ctrl-T · session", "Mark it for a move, or unmark it. The mark shows as ◆ and survives moving the cursor."},
 		{"Ctrl-T · workstream", "Move the marked session here. An orphaned runtime is explicitly adopted instead, which a named workstream accepts and Ungrouped does not."},
 		{"Shift-↑ / Shift-↓ · workstream", "Move a named workstream one position up or down; the order is durable."},
-		{"Shift-↑ / Shift-↓ · session", "Move it to the previous or next workstream, with Ungrouped last in the walk."},
+		{"Shift-↑ / Shift-↓ · session", "Move it one position within its named workstream; the order is durable. Ungrouped keeps live/newest order."},
 		{"Ctrl-O", "Edit the selected workstream's roots. The composer opens on the root Shift-Tab has selected; press Ctrl-O again to walk to the next one and then to an empty slot that adds."},
 		{"Ctrl-O · committing", "Enter saves the path shown. An empty draft removes that root and asks once more first; a workstream always keeps its last root."},
 		{archiveChordLabel + " · workstream", "Archive it, which takes it off the dashboard. The first press says what will happen and the second does it; every other key cancels. Archiving is organization rather than deletion or shutdown: no session record is removed and no runtime is stopped, so its sessions carry on running under Ungrouped. shepherd ws archive still does the same thing from the CLI."},
@@ -180,7 +182,9 @@ func (m Model) helpContentLines() []string {
 	lines = appendHelpParagraph(lines, m.width,
 		"Attachment enters the native Codex, Claude, or shell terminal. Use Ctrl-\\ or Ctrl-b d to detach back to the same Shepherd dashboard. Detaching and quitting Shepherd leave the agent running.")
 	lines = appendHelpParagraph(lines, m.width,
-		"While attached, tmux owns the mouse: dragging selects and copies to the system clipboard, and the wheel scrolls that pane's scrollback. That selection follows the drawn screen, so it stops at the pane and picks up whatever borders an agent's interface draws. Hold Shift while dragging for your terminal's own selection instead, which crosses panes and takes whole lines. iTerm2 uses Option for that rather than Shift.")
+		"While attached, tmux owns every drag even when the runner asked for mouse events, so dragging selects and copies consistently in Codex, Claude, and a shell. Plain clicks and wheel events remain available to runners that use them. The selection follows the drawn screen, stops at the pane edge, and includes any borders the runner paints. Hold Shift while dragging on the dashboard or in an attached session for terminal-native, cross-pane selection. iTerm2 uses Option instead.")
+	lines = appendHelpParagraph(lines, m.width,
+		"For keyboard copy, press Ctrl-b [, move to the start, press Space, extend the selection, and press Enter. Esc exits copy mode. Shepherd installs those same keys for tmux's vi and emacs mode tables.")
 
 	lines = appendHelpSection(lines, m.width, "CLI commands")
 	for _, binding := range []struct {
@@ -188,7 +192,7 @@ func (m Model) helpContentLines() []string {
 		description string
 	}{
 		{"shepherd", "Open the dashboard."},
-		{"shepherd quickstart [-r claude|codex] [-C DIR]", "Launch and attach an agent-guided first-use tour."},
+		{"shepherd quickstart", "Launch Claude in the Shepherd home and attach an agent-guided first-use tour."},
 		{"shepherd spawn [--json] [-r RUNNER] [-C DIR] [-w WORKSTREAM] LABEL", "Start a session without opening the dashboard; --json returns a machine-readable result."},
 		{"shepherd list [--json]", "List durable sessions and orphaned runtimes; --json returns the complete machine-readable projection."},
 		{"shepherd send [--json] ID MESSAGE", "Send a follow-up through tmux; --json returns a machine-readable result."},

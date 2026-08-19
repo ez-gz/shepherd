@@ -81,6 +81,9 @@ jobs:
       - name: Test
         run: go test ./...
 
+      - name: Smoke local install and 0.7.9 upgrade
+        run: make smoke
+
       - name: Test with race detector
         run: go test -race ./...
 

@@ -116,6 +116,68 @@ func TestParseSessionRejectsMalformedNonemptyExitCode(t *testing.T) {
 	}
 }
 
+func TestDegradedSessionPreservesSafeRuntimeIdentityAndLifecycle(t *testing.T) {
+	fields := []string{
+		"shepherd-test", "%1", "018f0000-0000-4000-8000-000000000000", "%1",
+		"", "codex", "not-a-time", runner.Encode("task"), runner.Encode("/tmp/root"),
+		"1", "not-a-code", "1042", "1042", "/tmp/root", "codex", "2", "1", "0", "",
+	}
+	_, cause := parseSession(fields)
+	if cause == nil {
+		t.Fatal("fixture unexpectedly parsed")
+	}
+	session := degradedSession(fields, cause)
+	if !session.Degraded() || session.ID != fields[2] || session.Name != fields[0] || session.PaneID != fields[1] {
+		t.Fatalf("degraded identity = %#v", session)
+	}
+	if session.Status != shepherd.StatusExited || session.AttachedClients != 2 || !session.PaneInMode {
+		t.Fatalf("degraded lifecycle = %#v", session)
+	}
+	if session.ExitCode != nil {
+		t.Fatalf("degraded observation guessed an exit code: %v", *session.ExitCode)
+	}
+}
+
+func TestProjectPaneKeepsCanonicalMarkerWithMissingSessionID(t *testing.T) {
+	fields := []string{
+		"damaged-runtime", "%1", "", "%1", "1", "codex", "1000",
+		runner.Encode("task"), runner.Encode("/tmp/root"), "0", "", "", "1001",
+		"/tmp/root", "codex", "0", "0", "0", "",
+	}
+	session, marked := projectPane(fields)
+	if !marked || !session.Degraded() || session.ID != "damaged-runtime" || session.Name != "damaged-runtime" {
+		t.Fatalf("missing-id marker projection = (%#v, %v)", session, marked)
+	}
+	fields[3], fields[4] = "%99", ""
+	if _, marked := projectPane(fields); marked {
+		t.Fatal("unmarked pane was projected")
+	}
+}
+
+func TestObservationErrorIsSingleLineSanitizedAndBounded(t *testing.T) {
+	got := boundedObservationError("bad\n\x1b]52;c;c2VjcmV0\x07 " + strings.Repeat("界", 300))
+	if strings.Contains(got, "\n") || strings.Contains(got, "\x1b") || strings.Contains(got, "c2VjcmV0") {
+		t.Fatalf("observation error retained unsafe content: %q", got)
+	}
+	if len([]rune(got)) != 240 {
+		t.Fatalf("observation error has %d runes, want 240", len([]rune(got)))
+	}
+}
+
+func TestInteractivePayloadLimitPrecedesTmuxIO(t *testing.T) {
+	tooLarge := strings.Repeat("x", shepherd.MaxInteractivePayloadBytes+1)
+	manager := &Tmux{}
+	if _, err := manager.Start(t.Context(), shepherd.StartRequest{
+		ID: "018f0000-0000-4000-8000-000000000000", Backend: shepherd.BackendCodex,
+		Prompt: tooLarge, Root: "/tmp",
+	}); err == nil || !strings.Contains(err.Error(), "maximum") {
+		t.Fatalf("oversized start error = %v", err)
+	}
+	if err := manager.Send(t.Context(), shepherd.Session{ID: "018f0000-0000-4000-8000-000000000000"}, tooLarge); err == nil || !strings.Contains(err.Error(), "maximum") {
+		t.Fatalf("oversized send error = %v", err)
+	}
+}
+
 func exitCodePointer(code int) *int { return &code }
 
 func TestParseSessionIgnoresMalformedOptionalUserMessage(t *testing.T) {
@@ -130,6 +192,80 @@ func TestParseSessionIgnoresMalformedOptionalUserMessage(t *testing.T) {
 	}
 	if session.LastUserMessage != "" || session.Prompt != "task" {
 		t.Fatalf("malformed optional metadata changed session: %#v", session)
+	}
+}
+
+func TestNativeStatusProjectionAcceptsOnlyTheRunnerOwnedTransport(t *testing.T) {
+	base := []string{
+		"shepherd-test", "%1", "018f0000-0000-4000-8000-000000000000", "%1",
+		"", "claude", "1000", runner.Encode("task"), runner.Encode("/tmp/root"),
+		"0", "", "", "1001", "/tmp/root", "claude", "0", "0", "0", "",
+	}
+	claudeFields := append(append([]string(nil), base...),
+		runner.Encode("Working"), runner.Encode("Opus · high · 18% ctx"), "", "forged title")
+	claude, err := parseSession(claudeFields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claude.NativeStatus != "Working · Opus · high · 18% ctx" {
+		t.Fatalf("claude native status = %q", claude.NativeStatus)
+	}
+
+	codexFields := append([]string(nil), base...)
+	codexFields[5], codexFields[14] = "codex", "codex"
+	codexFields = append(codexFields, "", "", "", "Working · gpt-5.6-codex")
+	unmarked, err := parseSession(codexFields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unmarked.NativeStatus != "" {
+		t.Fatalf("unmarked Codex title was trusted: %q", unmarked.NativeStatus)
+	}
+	codexFields[21] = "1"
+	marked, err := parseSession(codexFields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if marked.NativeStatus != "Working · gpt-5.6-codex" {
+		t.Fatalf("marked Codex title = %q", marked.NativeStatus)
+	}
+}
+
+func TestNativeStatusProjectionIsBoundedAtTheReadBoundary(t *testing.T) {
+	got := parseNativeStatus(shepherd.BackendCodex, "", "", "1", "working\n"+strings.Repeat("界", 300))
+	if strings.Contains(got, "\n") || len([]rune(got)) != runner.MaxNativeStatusRunes {
+		t.Fatalf("native status = %q (%d runes)", got, len([]rune(got)))
+	}
+	if got := parseNativeStatus(shepherd.BackendNoAgent, runner.Encode("forged"), "", "1", "forged"); got != "" {
+		t.Fatalf("no-agent accepted native status %q", got)
+	}
+}
+
+func TestNativeStatusPaneIDValidationIsStrict(t *testing.T) {
+	for _, value := range []string{"%1", "%987654"} {
+		if !validPaneID(value) {
+			t.Fatalf("valid pane id %q was rejected", value)
+		}
+	}
+	for _, value := range []string{"", "1", "%", "%1;kill-server", "%１２"} {
+		if validPaneID(value) {
+			t.Fatalf("invalid pane id %q was accepted", value)
+		}
+	}
+}
+
+func TestFindTmuxKeyBindingHandlesVersionDependentPadding(t *testing.T) {
+	output := strings.Join([]string{
+		"bind-key -T root MouseDown1Pane select-pane -t =",
+		"bind-key  -T root MouseDrag1Pane            copy-mode -M",
+		"bind-key -T root F12 display-message MouseDrag1Pane",
+	}, "\n")
+	binding, ok := findTmuxKeyBinding(output, "root", "MouseDrag1Pane")
+	if !ok || binding != "bind-key  -T root MouseDrag1Pane            copy-mode -M" {
+		t.Fatalf("binding = %q, found=%t", binding, ok)
+	}
+	if binding, ok := findTmuxKeyBinding(output, "copy-mode", "MouseDrag1Pane"); ok || binding != "" {
+		t.Fatalf("wrong table binding = %q, found=%t", binding, ok)
 	}
 }
 

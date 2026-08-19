@@ -171,6 +171,13 @@ type Model struct {
 	briefReport       brief.Report
 	briefFetch        briefFetchState
 
+	automaticTitles        map[string]string
+	automaticTitleTried    map[string]bool
+	automaticTitleScanned  map[string]time.Time
+	automaticTitleActive   string
+	automaticTitleFailure  string
+	generateAutomaticTitle automaticTitleFunc
+
 	input          []string
 	inputCursor    int
 	inputColumn    int
@@ -223,6 +230,8 @@ func New(controller control.Service, root string, backend shepherd.Backend, stor
 	return Model{
 		controller: controller, root: root, backend: backend, store: store, settings: settings,
 		overview: newOverviewModel(control.Snapshot{}), collapsed: make(map[string]bool), rootIndex: make(map[string]int),
+		automaticTitles: make(map[string]string), automaticTitleTried: make(map[string]bool),
+		automaticTitleScanned: make(map[string]time.Time), generateAutomaticTitle: defaultAutomaticTitle,
 		now: time.Now,
 	}
 }
@@ -350,7 +359,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.requestSnapshot()
 
 	case tickMsg:
-		return m, tea.Batch(m.requestSnapshot(), m.requestBrief(), tickCmd())
+		return m, tea.Batch(m.requestSnapshot(), m.requestBrief(), m.requestAutomaticTitle(), tickCmd())
 
 	case briefMsg:
 		accepted, queued := m.finishBrief(message.generation)
@@ -400,11 +409,30 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.restoreSelection()
 		if selected, ok := m.selectedSession(); ok && selected.Available() {
-			return m, tea.Batch(queuedSnapshot, m.requestPreview(selected.ID), m.artifactContextCmd(false))
+			return m, tea.Batch(queuedSnapshot, m.requestPreview(selected.ID), m.artifactContextCmd(false), m.requestAutomaticTitle())
 		}
 		m.previewFetch.queuedID = ""
 		m.preview, m.previewID = "", ""
-		return m, tea.Batch(queuedSnapshot, m.artifactContextCmd(false))
+		return m, tea.Batch(queuedSnapshot, m.artifactContextCmd(false), m.requestAutomaticTitle())
+
+	case automaticTitleMsg:
+		if message.id == "" || message.id != m.automaticTitleActive {
+			return m, nil
+		}
+		m.automaticTitleActive = ""
+		if message.err != nil {
+			m.automaticTitleFailure = message.err.Error()
+		}
+		if message.outputFound {
+			m.automaticTitleTried[message.id] = true
+			if message.err == nil && message.title != "" {
+				m.automaticTitles[message.id] = message.title
+				m.automaticTitleFailure = ""
+			}
+		} else {
+			m.automaticTitleScanned[message.id] = m.clock()
+		}
+		return m, m.requestAutomaticTitle()
 
 	case previewMsg:
 		accepted, queuedID := m.finishPreview(message.generation, message.id)
@@ -510,6 +538,10 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		// rather than allowed to land afterwards and repopulate them.
 		m.briefObservations, m.briefReport = nil, brief.Report{}
 		m.briefFetch.activeGeneration, m.briefFetch.queued = 0, false
+		if !m.settings.AutomaticTitle {
+			m.automaticTitleActive = ""
+			m.automaticTitleFailure = ""
+		}
 		m.errorText = ""
 		m.notice = "settings reloaded · brief applies now, commands to new sessions"
 		return m, nil
@@ -551,6 +583,16 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				m.notice = "moved workstream " + direction
 			} else {
 				m.notice = "workstream is already " + boundary
+			}
+		case "session_reorder":
+			direction, boundary := "down", "last"
+			if message.delta < 0 {
+				direction, boundary = "up", "first"
+			}
+			if message.moved {
+				m.notice = "moved " + format.ShortID(message.sessionID) + " " + direction
+			} else {
+				m.notice = "session is already " + boundary + " in this workstream"
 			}
 		case "archive":
 			// Its sessions are in Ungrouped now, so the cursor follows them there
@@ -620,6 +662,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.insertText(normalizeComposerPaste(message.Content))
 		m.notice = ""
 		return m, nil
+
+	case tea.MouseMsg:
+		return m.handleMouse(message)
 
 	case tea.KeyPressMsg:
 		return m.handleKey(message)
@@ -911,6 +956,10 @@ func (m Model) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		if !selected.Available() {
 			m.errorText = "this runtime is unavailable"
+			return m, nil
+		}
+		if selected.Status == control.StatusDegraded {
+			m.errorText = "runtime metadata is degraded; attach or stop it instead"
 			return m, nil
 		}
 		m.busy = true
@@ -1360,9 +1409,9 @@ func archiveConsequence(sessions []control.Session) string {
 	return fmt.Sprintf("%s · %d live keep running", moved, live)
 }
 
-// reorderSelection moves a workstream in the durable display order, or moves a
-// session to the adjacent workstream. Sessions have no durable order inside a
-// workstream to change; see todos/session-ordering.md.
+// reorderSelection moves a named workstream or one of its member sessions in
+// the corresponding durable display order. Cross-workstream moves remain the
+// explicit Ctrl-T operation, so an ordering chord never changes membership.
 func (m Model) reorderSelection(delta int) (tea.Model, tea.Cmd) {
 	row, ok := m.selectedRow()
 	if !ok {
@@ -1378,44 +1427,17 @@ func (m Model) reorderSelection(delta int) (tea.Model, tea.Cmd) {
 		m.notice = "moving workstream…"
 		return m, m.reorderWorkstreamCmd(row.workstreamID, delta)
 	case rowSession:
-		destination, ok := m.adjacentWorkstream(row.workstreamID, delta)
-		if !ok {
-			edge := "first"
-			if delta > 0 {
-				edge = "last"
-			}
-			m.errorText = "already in the " + edge + " workstream"
+		if row.workstreamID == "" {
+			m.errorText = "Ungrouped sessions use live/newest order; move this session into a workstream to order it"
 			return m, nil
 		}
 		m.busy = true
-		m.notice = "moving " + format.ShortID(row.sessionID) + "…"
-		return m, m.moveSessionCmd(row.sessionID, destination)
+		m.notice = "reordering " + format.ShortID(row.sessionID) + "…"
+		return m, m.reorderSessionCmd(row.sessionID, delta)
 	case rowOrphan:
-		m.errorText = "adopt this runtime with Ctrl-T before moving it"
+		m.errorText = "adopt this runtime with Ctrl-T before ordering it"
 	}
 	return m, nil
-}
-
-// adjacentWorkstream walks the durable workstream order with Ungrouped pinned
-// at the end, so Shift-Up and Shift-Down step a session through exactly the
-// destinations the list already displays, in the order it displays them.
-func (m Model) adjacentWorkstream(current string, delta int) (string, bool) {
-	order := make([]string, 0, len(m.overview.workstreams)+1)
-	for _, item := range m.overview.workstreams {
-		order = append(order, item.ID)
-	}
-	order = append(order, "")
-	for index, id := range order {
-		if id != current {
-			continue
-		}
-		next := index + delta
-		if next < 0 || next >= len(order) {
-			return "", false
-		}
-		return order[next], true
-	}
-	return "", false
 }
 
 func (m *Model) beginComposerEdit(mode composerEditMode, target, value string) {
@@ -1521,17 +1543,20 @@ func (m Model) View() tea.View {
 	if m.width <= 0 || m.height <= 0 {
 		view := tea.NewView("")
 		view.AltScreen = true
+		view.MouseMode = tea.MouseModeCellMotion
 		return view
 	}
 	if m.overlay == overlayHelp {
 		view := tea.NewView(textStyle.MaxWidth(m.width).Render(m.renderHelp()))
 		view.AltScreen = true
+		view.MouseMode = tea.MouseModeCellMotion
 		view.WindowTitle = "shepherd · help"
 		return view
 	}
 	if m.screen == screenSettings {
 		view := tea.NewView(textStyle.MaxWidth(m.width).Render(m.renderSettings()))
 		view.AltScreen = true
+		view.MouseMode = tea.MouseModeCellMotion
 		view.WindowTitle = "shepherd · settings"
 		return view
 	}
@@ -1539,6 +1564,7 @@ func (m Model) View() tea.View {
 	content := textStyle.MaxWidth(m.width).Render(strings.Join(sections, "\n"))
 	view := tea.NewView(clipPane(content, m.width, m.height))
 	view.AltScreen = true
+	view.MouseMode = tea.MouseModeCellMotion
 	view.WindowTitle = "shepherd · parallel agents"
 	return view
 }
@@ -1597,13 +1623,7 @@ func (m Model) renderWorkstreams() string {
 		line := mutedStyle.Render("  No workstreams yet. Press Ctrl-N to create one.")
 		return line + strings.Repeat("\n", max(0, height-1))
 	}
-	start := 0
-	if m.cursor >= height {
-		start = m.cursor - height + 1
-	}
-	if start+height > len(rows) {
-		start = max(0, len(rows)-height)
-	}
+	start := m.listViewportStart(rows)
 	end := min(len(rows), start+height)
 	lines := make([]string, 0, height)
 	for index := start; index < end; index++ {
@@ -1801,7 +1821,7 @@ func (m Model) renderDetails() string {
 	outputRoom := height - len(lines)
 	if outputRoom > 0 {
 		preview := m.preview
-		if !selected.Available() {
+		if !selected.Available() || selected.Status == control.StatusDegraded {
 			preview = unavailableMessage(selected)
 		} else if m.previewID != selected.ID {
 			preview = "loading terminal preview…"
@@ -1946,6 +1966,7 @@ func (m Model) settingsLines() []string {
 		mutedStyle.Render(" state    ") + state,
 		mutedStyle.Render(" app data ") + truncatePlain(format.OneLine(format.CompactPath(m.snapshot.StatePath)), max(1, m.width-10)),
 		mutedStyle.Render(" startup default  ") + backendStyle(m.settings.DefaultRunner).Render(string(m.settings.DefaultRunner)),
+		m.automaticTitleSettingsLine(),
 		"", lipgloss.NewStyle().Bold(true).Render(" composer keys"),
 		mutedStyle.Render(" commit ") + "Enter sends to the destination shown in the composer",
 		mutedStyle.Render(" empty  ") + helpKeyLabel(m.settings.ReplyKey()) + " reply to selection",
@@ -2509,6 +2530,15 @@ func (m Model) reorderWorkstreamCmd(id string, delta int) tea.Cmd {
 	}
 }
 
+func (m Model) reorderSessionCmd(id string, delta int) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+		defer cancel()
+		moved, err := m.controller.ReorderSession(ctx, id, delta)
+		return workstreamMsg{action: "session_reorder", sessionID: id, delta: delta, moved: moved, err: err}
+	}
+}
+
 func (m Model) moveSessionCmd(sessionID, workstreamID string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
@@ -2551,6 +2581,8 @@ func statusLabel(session control.Session) (string, string) {
 		return "●", "live"
 	case control.StatusStartFailed:
 		return "×", "start failed"
+	case control.StatusDegraded:
+		return "!", "degraded"
 	case control.StatusUnavailable:
 		return "?", "unavailable"
 	case control.StatusStopped:
@@ -2574,6 +2606,11 @@ func unavailableMessage(session control.Session) string {
 		return "start failed: " + session.Record.Outcome.Error
 	}
 	switch session.Status {
+	case control.StatusDegraded:
+		if session.Runtime != nil && session.Runtime.ObservationError != "" {
+			return "runtime metadata is degraded: " + session.Runtime.ObservationError + "; attach or stop remains available"
+		}
+		return "runtime metadata is degraded; attach or stop remains available"
 	case control.StatusStopped:
 		return "runtime was explicitly stopped; the durable session record remains"
 	case control.StatusExited:

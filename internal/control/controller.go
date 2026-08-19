@@ -24,6 +24,7 @@ const (
 	StatusStopped     Status = "stopped"
 	StatusStartFailed Status = "start_failed"
 	StatusUnavailable Status = "unavailable"
+	StatusDegraded    Status = "degraded"
 )
 
 type Session struct {
@@ -41,6 +42,13 @@ type Session struct {
 	Orphaned        bool
 	Record          workstream.SessionRecord
 	Runtime         *shepherd.Session
+	// AutomaticTitle is an in-memory dashboard projection. The controller never
+	// populates or persists it; a caller may attach one before resolving briefs.
+	AutomaticTitle string
+	// ContinuedExisting is true only on the direct result of ResumeSession when
+	// a live Codex session already owned the conversation and received the
+	// message. Snapshot projections leave it false.
+	ContinuedExisting bool
 }
 
 // ConversationID is the id the runner filed this session's conversation under,
@@ -134,6 +142,7 @@ type StartRequest struct {
 	// resume path from a conversation Shepherd already registered, so no surface
 	// can start a session against an id nobody verified.
 	resume string
+	fork   bool
 }
 
 type Service interface {
@@ -141,6 +150,7 @@ type Service interface {
 	Find(context.Context, string) (Session, error)
 	Start(context.Context, StartRequest) (Session, error)
 	ResumeSession(context.Context, string, string) (Session, error)
+	ForkSession(context.Context, string, string) (Session, error)
 	RegisterConversation(context.Context, string) (workstream.Conversation, error)
 	Send(context.Context, string, string) error
 	Capture(context.Context, string, int) (string, error)
@@ -151,6 +161,7 @@ type Service interface {
 	CreateWorkstream(context.Context, string, string, []string) (workstream.Workstream, error)
 	RenameWorkstream(context.Context, string, string) error
 	ReorderWorkstream(context.Context, string, int) (bool, error)
+	ReorderSession(context.Context, string, int) (bool, error)
 	ArchiveWorkstream(context.Context, string) error
 	MoveSession(context.Context, string, string) error
 	AdoptSession(context.Context, string, string) (Session, error)
@@ -205,6 +216,9 @@ func (c *Controller) Execute(ctx context.Context, command Command) (CommandResul
 	case ResumeSessionAction:
 		session, err := c.resumeSession(ctx, action.SessionID, action.Prompt, command.Scope.WorkstreamID)
 		return CommandResult{Session: session}, err
+	case ForkSessionAction:
+		session, err := c.forkSession(ctx, action.SessionID, action.Prompt, command.Scope.WorkstreamID)
+		return CommandResult{Session: session}, err
 	case RegisterConversationAction:
 		conversation, err := c.registerConversation(ctx, action.SessionID)
 		return CommandResult{Conversation: conversation}, err
@@ -223,6 +237,9 @@ func (c *Controller) Execute(ctx context.Context, command Command) (CommandResul
 		return CommandResult{}, c.renameWorkstream(ctx, command.Scope.WorkstreamID, action.Name)
 	case ReorderWorkstreamAction:
 		moved, err := c.reorderWorkstream(ctx, command.Scope.WorkstreamID, action.Delta)
+		return CommandResult{Moved: moved}, err
+	case ReorderSessionAction:
+		moved, err := c.reorderSession(ctx, command.Scope.WorkstreamID, action.SessionID, action.Delta)
 		return CommandResult{Moved: moved}, err
 	case ArchiveWorkstreamAction:
 		return CommandResult{}, c.archiveWorkstream(ctx, command.Scope.WorkstreamID)
@@ -261,7 +278,7 @@ func (c *Controller) Snapshot(ctx context.Context) (Snapshot, error) {
 		for index := range state.Sessions {
 			record := &state.Sessions[index]
 			runtime, ok := runtimeByID[record.ID]
-			if !ok {
+			if !ok || runtime.Degraded() {
 				continue
 			}
 			binding := runtimeBinding(c.socket, runtime, now)
@@ -360,6 +377,9 @@ func (c *Controller) startLocked(ctx context.Context, request StartRequest) (Ses
 	if strings.TrimSpace(prompt) == "" {
 		return Session{}, errors.New("prompt cannot be empty")
 	}
+	if err := shepherd.ValidateInteractivePayload("prompt", prompt); err != nil {
+		return Session{}, err
+	}
 	if _, err := shepherd.ParseBackend(string(request.Backend)); err != nil {
 		return Session{}, err
 	}
@@ -392,7 +412,8 @@ func (c *Controller) startLocked(ctx context.Context, request StartRequest) (Ses
 		state.Sessions = append(state.Sessions, record)
 		if request.WorkstreamID != "" {
 			state.Memberships = append(state.Memberships, workstream.Membership{
-				WorkstreamID: request.WorkstreamID, SessionID: id, JoinedAt: now,
+				WorkstreamID: request.WorkstreamID, SessionID: id,
+				Position: nextMembershipPosition(*state, request.WorkstreamID), JoinedAt: now,
 			})
 		}
 		return true, nil
@@ -412,7 +433,7 @@ func (c *Controller) startLocked(ctx context.Context, request StartRequest) (Ses
 		startAttempted = true
 		runtime, launchErr = c.supervisor.Start(ctx, shepherd.StartRequest{
 			ID: id, Backend: request.Backend, Prompt: prompt, Root: root, Command: command,
-			Resume: request.resume,
+			Resume: request.resume, Fork: request.fork,
 		})
 	}
 	if launchErr != nil && startAttempted {
@@ -501,6 +522,11 @@ func (c *Controller) startLocked(ctx context.Context, request StartRequest) (Ses
 // exact failure the source field exists to prevent.
 func assignedConversation(request StartRequest, id string, at time.Time) *workstream.Conversation {
 	switch {
+	case request.fork:
+		// A fork creates a runner-minted identity. The source conversation is
+		// known, but the fork's new id is not, so recording the source id here
+		// would turn a branch into a second writer on paper.
+		return nil
 	case strings.TrimSpace(request.resume) != "":
 		return &workstream.Conversation{
 			ID: request.resume, Source: workstream.ConversationAssigned, RecordedAt: at,
@@ -600,6 +626,18 @@ func (c *Controller) ResumeSession(ctx context.Context, id, prompt string) (Sess
 }
 
 func (c *Controller) resumeSession(ctx context.Context, id, prompt, workstreamID string) (Session, error) {
+	var session Session
+	var resumeErr error
+	if err := c.store.WithLifecycleLock(ctx, func() error {
+		session, resumeErr = c.resumeSessionLocked(ctx, id, prompt, workstreamID)
+		return nil
+	}); err != nil {
+		return Session{}, err
+	}
+	return session, resumeErr
+}
+
+func (c *Controller) resumeSessionLocked(ctx context.Context, id, prompt, workstreamID string) (Session, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return Session{}, errors.New("session id is required")
@@ -622,10 +660,125 @@ func (c *Controller) resumeSession(ctx context.Context, id, prompt, workstreamID
 	if err != nil {
 		return Session{}, fmt.Errorf("resume session %q: %w", id, err)
 	}
-	return c.start(ctx, StartRequest{
+	if record.Backend == shepherd.BackendCodex {
+		owner, runtime, found, err := c.liveConversationOwner(ctx, conversation.ID)
+		if err != nil {
+			return Session{}, fmt.Errorf("resume session %q: %w", id, err)
+		}
+		if found {
+			if err := c.supervisor.Send(ctx, runtime, prompt); err != nil {
+				return Session{}, fmt.Errorf("continue live codex session %q: %w", owner.ID, err)
+			}
+			state, err := c.store.Load(ctx)
+			if err != nil {
+				return Session{}, err
+			}
+			view := projectOne(state, owner, &runtime)
+			view.ContinuedExisting = true
+			return view, nil
+		}
+	}
+	return c.startLocked(ctx, StartRequest{
 		Backend: record.Backend, Prompt: prompt, Root: record.InitialRoot,
 		WorkstreamID: workstreamID, resume: conversation.ID,
 	})
+}
+
+// liveConversationOwner returns the sole live durable Codex session registered
+// to a conversation. Failing closed on observation errors or a pre-existing
+// duplicate is what prevents ResumeSession from creating a third writer.
+func (c *Controller) liveConversationOwner(ctx context.Context, conversationID string) (workstream.SessionRecord, shepherd.Session, bool, error) {
+	state, err := c.store.Load(ctx)
+	if err != nil {
+		return workstream.SessionRecord{}, shepherd.Session{}, false, err
+	}
+	runtimes, err := c.supervisor.Sessions(ctx)
+	if err != nil {
+		return workstream.SessionRecord{}, shepherd.Session{}, false,
+			fmt.Errorf("cannot establish live conversation ownership: %w", err)
+	}
+	live := make(map[string]shepherd.Session, len(runtimes))
+	for _, runtime := range runtimes {
+		if runtime.Alive() {
+			live[runtime.ID] = runtime
+		}
+	}
+	var owner workstream.SessionRecord
+	var ownerRuntime shepherd.Session
+	found := false
+	for _, candidate := range state.Sessions {
+		if candidate.Backend != shepherd.BackendCodex || candidate.Conversation == nil ||
+			candidate.Conversation.ID != conversationID {
+			continue
+		}
+		runtime, ok := live[candidate.ID]
+		if !ok {
+			continue
+		}
+		if found {
+			return workstream.SessionRecord{}, shepherd.Session{}, false,
+				fmt.Errorf("codex conversation %q already has multiple live writers (%s and %s); stop one before continuing",
+					conversationID, owner.ID, candidate.ID)
+		}
+		owner, ownerRuntime, found = candidate, runtime, true
+	}
+	return owner, ownerRuntime, found, nil
+}
+
+// ForkSession explicitly branches a Codex conversation into a new session.
+func (c *Controller) ForkSession(ctx context.Context, id, prompt string) (Session, error) {
+	state, err := c.store.Load(ctx)
+	if err != nil {
+		return Session{}, err
+	}
+	workstreamID := state.WorkstreamForSession(strings.TrimSpace(id))
+	result, err := c.Execute(ctx, humanCommand(scopeForWorkstream(workstreamID), ForkSessionAction{
+		SessionID: id, Prompt: prompt,
+	}))
+	return result.Session, err
+}
+
+func (c *Controller) forkSession(ctx context.Context, id, prompt, workstreamID string) (Session, error) {
+	var session Session
+	var forkErr error
+	if err := c.store.WithLifecycleLock(ctx, func() error {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			forkErr = errors.New("session id is required")
+			return nil
+		}
+		if strings.TrimSpace(prompt) == "" {
+			forkErr = errors.New("prompt cannot be empty")
+			return nil
+		}
+		state, err := c.store.Load(ctx)
+		if err != nil {
+			forkErr = err
+			return nil
+		}
+		record, ok := state.Session(id)
+		if !ok {
+			forkErr = fmt.Errorf("durable session %q not found", id)
+			return nil
+		}
+		if record.Backend != shepherd.BackendCodex {
+			forkErr = fmt.Errorf("fork is currently supported only for codex conversations, not %s", record.Backend)
+			return nil
+		}
+		conversation, err := c.registerConversation(ctx, id)
+		if err != nil {
+			forkErr = fmt.Errorf("fork session %q: %w", id, err)
+			return nil
+		}
+		session, forkErr = c.startLocked(ctx, StartRequest{
+			Backend: record.Backend, Prompt: prompt, Root: record.InitialRoot,
+			WorkstreamID: workstreamID, resume: conversation.ID, fork: true,
+		})
+		return nil
+	}); err != nil {
+		return Session{}, err
+	}
+	return session, forkErr
 }
 
 func (c *Controller) Send(ctx context.Context, id, message string) error {
@@ -637,6 +790,10 @@ func (c *Controller) send(ctx context.Context, id, message string) error {
 	runtime, err := c.supervisor.Find(ctx, id)
 	if err != nil {
 		return err
+	}
+	if runtime.Degraded() {
+		return fmt.Errorf("session %s metadata is degraded: %s; attach or stop it instead of injecting input",
+			runtime.ID, runtime.ObservationError)
 	}
 	return c.supervisor.Send(ctx, runtime, message)
 }
@@ -740,13 +897,7 @@ func (c *Controller) deleteSessionLocked(ctx context.Context, id string) error {
 		}
 
 		state.Sessions = append(state.Sessions[:index], state.Sessions[index+1:]...)
-		memberships := state.Memberships[:0]
-		for _, membership := range state.Memberships {
-			if membership.SessionID != id {
-				memberships = append(memberships, membership)
-			}
-		}
-		state.Memberships = memberships
+		removeSessionMembership(state, id)
 		return true, nil
 	})
 	return err
@@ -846,7 +997,13 @@ func (c *Controller) createWorkstream(ctx context.Context, name, description str
 		ArtifactDir: filepath.Join(c.store.ArtifactBase(), id), Roots: normalized,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	if err := os.MkdirAll(item.ArtifactDir, 0o700); err != nil {
+	if err := os.MkdirAll(c.store.ArtifactBase(), 0o700); err != nil {
+		return workstream.Workstream{}, fmt.Errorf("create workstream artifact base: %w", err)
+	}
+	// The generated id makes this directory ours only when Mkdir creates it.
+	// Refuse an unexpected collision so a later state failure can never remove
+	// a pre-existing directory that belongs to somebody else.
+	if err := os.Mkdir(item.ArtifactDir, 0o700); err != nil {
 		return workstream.Workstream{}, fmt.Errorf("create workstream artifact directory: %w", err)
 	}
 	_, err = c.store.Mutate(ctx, func(state *workstream.State) (bool, error) {
@@ -858,6 +1015,12 @@ func (c *Controller) createWorkstream(ctx context.Context, name, description str
 		state.Workstreams = append(state.Workstreams, item)
 		return true, nil
 	})
+	if err != nil {
+		if removeErr := os.Remove(item.ArtifactDir); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			return workstream.Workstream{}, errors.Join(err,
+				fmt.Errorf("remove unused workstream artifact directory: %w", removeErr))
+		}
+	}
 	return item, err
 }
 
@@ -935,6 +1098,74 @@ func (c *Controller) reorderWorkstream(ctx context.Context, id string, delta int
 	return moved && err == nil, err
 }
 
+// ReorderSession moves a durable member by one position inside its current
+// named workstream. Ungrouped has no membership and intentionally keeps its
+// live/newest projection rather than acquiring a second ordering model.
+func (c *Controller) ReorderSession(ctx context.Context, id string, delta int) (bool, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return false, errors.New("session id is required")
+	}
+	state, err := c.store.Load(ctx)
+	if err != nil {
+		return false, err
+	}
+	if _, ok := state.Session(id); !ok {
+		return false, fmt.Errorf("durable session %q not found", id)
+	}
+	membership, ok := state.MembershipForSession(id)
+	if !ok {
+		return false, fmt.Errorf("session %q is Ungrouped and has no durable position", id)
+	}
+	result, err := c.Execute(ctx, humanCommand(WorkstreamScope(membership.WorkstreamID), ReorderSessionAction{
+		SessionID: id, Delta: delta,
+	}))
+	return result.Moved, err
+}
+
+func (c *Controller) reorderSession(ctx context.Context, workstreamID, sessionID string, delta int) (bool, error) {
+	if delta != -1 && delta != 1 {
+		return false, fmt.Errorf("session reorder delta must be -1 or 1 (got %d)", delta)
+	}
+	moved := false
+	_, err := c.store.Mutate(ctx, func(state *workstream.State) (bool, error) {
+		if _, ok := state.Session(sessionID); !ok {
+			return false, fmt.Errorf("durable session %q not found", sessionID)
+		}
+		membershipIndex, targetIndex := -1, -1
+		position := -1
+		for index, membership := range state.Memberships {
+			if membership.SessionID == sessionID {
+				if membership.WorkstreamID != workstreamID {
+					return false, fmt.Errorf("session %q no longer belongs to workstream %q", sessionID, workstreamID)
+				}
+				membershipIndex, position = index, membership.Position
+			}
+		}
+		if membershipIndex == -1 {
+			return false, fmt.Errorf("session %q is Ungrouped and has no durable position", sessionID)
+		}
+		targetPosition := position + delta
+		if targetPosition < 0 {
+			return false, nil
+		}
+		for index, membership := range state.Memberships {
+			if membership.WorkstreamID == workstreamID && membership.Position == targetPosition {
+				targetIndex = index
+				break
+			}
+		}
+		if targetIndex == -1 {
+			return false, nil
+		}
+		state.Memberships[membershipIndex].Position, state.Memberships[targetIndex].Position =
+			state.Memberships[targetIndex].Position, state.Memberships[membershipIndex].Position
+		moved = true
+		return true, nil
+	})
+	return moved && err == nil, err
+}
+
 func (c *Controller) ArchiveWorkstream(ctx context.Context, id string) error {
 	_, err := c.Execute(ctx, humanCommand(WorkstreamScope(id), ArchiveWorkstreamAction{}))
 	return err
@@ -992,16 +1223,11 @@ func (c *Controller) moveSession(ctx context.Context, sessionID, workstreamID st
 		if current == workstreamID {
 			return false, nil
 		}
-		memberships := state.Memberships[:0]
-		for _, membership := range state.Memberships {
-			if membership.SessionID != sessionID {
-				memberships = append(memberships, membership)
-			}
-		}
-		state.Memberships = memberships
+		removeSessionMembership(state, sessionID)
 		if workstreamID != "" {
 			state.Memberships = append(state.Memberships, workstream.Membership{
-				WorkstreamID: workstreamID, SessionID: sessionID, JoinedAt: now,
+				WorkstreamID: workstreamID, SessionID: sessionID,
+				Position: nextMembershipPosition(*state, workstreamID), JoinedAt: now,
 			})
 		}
 		return true, nil
@@ -1023,6 +1249,10 @@ func (c *Controller) adoptSession(ctx context.Context, sessionID, workstreamID s
 	runtime, err := c.supervisor.Find(ctx, sessionID)
 	if err != nil {
 		return Session{}, err
+	}
+	if runtime.Degraded() {
+		return Session{}, fmt.Errorf("cannot adopt session %s while its tmux metadata is degraded: %s",
+			runtime.ID, runtime.ObservationError)
 	}
 	now := c.now()
 	createdAt := runtime.StartedAt
@@ -1057,7 +1287,8 @@ func (c *Controller) adoptSession(ctx context.Context, sessionID, workstreamID s
 		state.Sessions = append(state.Sessions, record)
 		if workstreamID != "" {
 			state.Memberships = append(state.Memberships, workstream.Membership{
-				WorkstreamID: workstreamID, SessionID: runtime.ID, JoinedAt: now,
+				WorkstreamID: workstreamID, SessionID: runtime.ID,
+				Position: nextMembershipPosition(*state, workstreamID), JoinedAt: now,
 			})
 		}
 		return true, nil
@@ -1205,7 +1436,9 @@ func project(state workstream.State, runtimes []shepherd.Session, path string) S
 		}
 		copy := runtime
 		status := StatusExited
-		if runtime.Alive() {
+		if runtime.Degraded() {
+			status = StatusDegraded
+		} else if runtime.Alive() {
 			status = StatusLive
 		}
 		snapshot.Orphans = append(snapshot.Orphans, Session{
@@ -1220,13 +1453,46 @@ func project(state workstream.State, runtimes []shepherd.Session, path string) S
 		}
 		return snapshot.Sessions[i].CreatedAt.After(snapshot.Sessions[j].CreatedAt)
 	})
+	applyMembershipOrder(&snapshot, state)
 	return snapshot
+}
+
+// applyMembershipOrder replaces only the relative slots occupied by members
+// of each named workstream. That makes their explicit positions authoritative
+// without regrouping the flat projection; Ungrouped sessions retain their
+// relative live/newest order.
+func applyMembershipOrder(snapshot *Snapshot, state workstream.State) {
+	positionBySession := make(map[string]int, len(state.Memberships))
+	for _, membership := range state.Memberships {
+		positionBySession[membership.SessionID] = membership.Position
+	}
+	for _, container := range state.Workstreams {
+		if container.ArchivedAt != nil {
+			continue
+		}
+		indexes := make([]int, 0)
+		members := make([]Session, 0)
+		for index, session := range snapshot.Sessions {
+			if session.WorkstreamID == container.ID {
+				indexes = append(indexes, index)
+				members = append(members, session)
+			}
+		}
+		sort.SliceStable(members, func(i, j int) bool {
+			return positionBySession[members[i].ID] < positionBySession[members[j].ID]
+		})
+		for index := range indexes {
+			snapshot.Sessions[indexes[index]] = members[index]
+		}
+	}
 }
 
 func projectOne(state workstream.State, record workstream.SessionRecord, runtime *shepherd.Session) Session {
 	status := StatusUnavailable
 	if runtime != nil {
-		if runtime.Alive() {
+		if runtime.Degraded() {
+			status = StatusDegraded
+		} else if runtime.Alive() {
 			status = StatusLive
 		} else {
 			status = StatusExited
@@ -1286,6 +1552,38 @@ func validateRoot(value string) (string, error) {
 
 func containsRoot(roots []string, query string) bool {
 	return rootIndex(roots, query) >= 0
+}
+
+func nextMembershipPosition(state workstream.State, workstreamID string) int {
+	position := 0
+	for _, membership := range state.Memberships {
+		if membership.WorkstreamID == workstreamID && membership.Position >= position {
+			position = membership.Position + 1
+		}
+	}
+	return position
+}
+
+// removeSessionMembership also closes the removed member's position gap. The
+// store validates positions as dense, so every path that removes one member
+// uses this helper before the mutation can commit.
+func removeSessionMembership(state *workstream.State, sessionID string) (workstream.Membership, bool) {
+	removed, ok := state.MembershipForSession(sessionID)
+	if !ok {
+		return workstream.Membership{}, false
+	}
+	memberships := state.Memberships[:0]
+	for _, membership := range state.Memberships {
+		if membership.SessionID == sessionID {
+			continue
+		}
+		if membership.WorkstreamID == removed.WorkstreamID && membership.Position > removed.Position {
+			membership.Position--
+		}
+		memberships = append(memberships, membership)
+	}
+	state.Memberships = memberships
+	return removed, true
 }
 
 func rootIndex(roots []string, query string) int {

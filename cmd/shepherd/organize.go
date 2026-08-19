@@ -452,6 +452,49 @@ func (a *app) runMove(args []string) error {
 	return nil
 }
 
+func (a *app) runSessionReorder(args []string) error {
+	flags := a.newFlagSet("shepherd reorder")
+	socket := flags.String("socket", defaultSocket(), "private tmux socket name")
+	up := flags.Bool("up", false, "move one position earlier in the workstream")
+	down := flags.Bool("down", false, "move one position later in the workstream")
+	jsonOutput := flags.Bool("json", false, "write a machine-readable result")
+	if err := parseAnywhere(flags, args); err != nil {
+		return err
+	}
+	if flags.NArg() != 1 || *up == *down {
+		return errors.New("usage: shepherd reorder <session> --up|--down")
+	}
+	controller, err := a.dial(*socket)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), organizeTimeout)
+	defer cancel()
+	session, err := controller.Find(ctx, flags.Arg(0))
+	if err != nil {
+		return err
+	}
+	delta := 1
+	if *up {
+		delta = -1
+	}
+	moved, err := controller.ReorderSession(ctx, session.ID, delta)
+	if err != nil {
+		return err
+	}
+	status := "moved"
+	if !moved {
+		status = "already at the edge"
+	}
+	if *jsonOutput {
+		return writeJSON(a.out, map[string]any{
+			"status": "reordered", "session_id": session.ID, "moved": moved,
+		})
+	}
+	fmt.Fprintf(a.out, "%s %s\n", format.ShortID(session.ID), status)
+	return nil
+}
+
 func (a *app) runAdopt(args []string) error {
 	flags := a.newFlagSet("shepherd adopt")
 	socket := flags.String("socket", defaultSocket(), "private tmux socket name")

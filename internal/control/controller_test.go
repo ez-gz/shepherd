@@ -3,8 +3,11 @@ package control
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -20,6 +23,7 @@ type memoryRepository struct {
 	state       workstream.State
 	path        string
 	artifacts   string
+	mutateErr   error
 }
 
 func newMemoryRepository(root string) *memoryRepository {
@@ -35,6 +39,9 @@ func (r *memoryRepository) Load(context.Context) (workstream.State, error) {
 func (r *memoryRepository) Mutate(_ context.Context, mutate func(*workstream.State) (bool, error)) (workstream.State, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.mutateErr != nil {
+		return workstream.State{}, r.mutateErr
+	}
 	state := cloneState(r.state)
 	changed, err := mutate(&state)
 	if err != nil {
@@ -183,6 +190,132 @@ func TestReorderWorkstreamPersistsVisibleOrderAndSkipsArchived(t *testing.T) {
 	}
 }
 
+func TestReorderSessionPersistsOrderWithinItsWorkstream(t *testing.T) {
+	root := t.TempDir()
+	repository := newMemoryRepository(root)
+	controller := New(&fakeSupervisor{}, repository, "shepherd-test")
+	container, err := controller.CreateWorkstream(context.Background(), "Core", "", []string{root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_700_000_000, 0).UTC()
+	ids := []string{
+		"018f0000-0000-4000-8000-0000000000c1",
+		"018f0000-0000-4000-8000-0000000000c2",
+		"018f0000-0000-4000-8000-0000000000c3",
+	}
+	_, err = repository.Mutate(context.Background(), func(state *workstream.State) (bool, error) {
+		for position, id := range ids {
+			state.Sessions = append(state.Sessions, workstream.SessionRecord{
+				ID: id, Backend: shepherd.BackendCodex, InitialPrompt: fmt.Sprintf("task %d", position),
+				InitialRoot: root, CreatedAt: now.Add(time.Duration(position) * time.Minute),
+				Launch: workstream.LaunchIntent{Status: workstream.LaunchPending},
+			})
+			state.Memberships = append(state.Memberships, workstream.Membership{
+				WorkstreamID: container.ID, SessionID: id, Position: position, JoinedAt: now,
+			})
+		}
+		return true, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if moved, err := controller.ReorderSession(context.Background(), ids[1], -1); err != nil {
+		t.Fatal(err)
+	} else if !moved {
+		t.Fatal("valid session reorder reported a no-op")
+	}
+	snapshot, err := controller.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, 0, len(snapshot.Sessions))
+	for _, session := range snapshot.Sessions {
+		if session.WorkstreamID == container.ID {
+			got = append(got, session.ID)
+		}
+	}
+	want := []string{ids[1], ids[0], ids[2]}
+	if !slices.Equal(got, want) {
+		t.Fatalf("visible session order = %v, want %v", got, want)
+	}
+
+	state, err := repository.Load(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeBoundary := state.Revision
+	if moved, err := controller.ReorderSession(context.Background(), ids[1], -1); err != nil {
+		t.Fatal(err)
+	} else if moved {
+		t.Fatal("boundary session reorder reported a move")
+	}
+	state, err = repository.Load(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Revision != beforeBoundary {
+		t.Fatalf("boundary reorder advanced revision from %d to %d", beforeBoundary, state.Revision)
+	}
+	if _, err := controller.ReorderSession(context.Background(), ids[0], 0); err == nil {
+		t.Fatal("invalid session reorder delta was accepted")
+	}
+}
+
+func TestMoveSessionCompactsSourceOrderAndAppendsToDestination(t *testing.T) {
+	root := t.TempDir()
+	repository := newMemoryRepository(root)
+	controller := New(&fakeSupervisor{}, repository, "shepherd-test")
+	first, err := controller.CreateWorkstream(context.Background(), "First", "", []string{root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := controller.CreateWorkstream(context.Background(), "Second", "", []string{root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_700_000_000, 0).UTC()
+	ids := []string{
+		"018f0000-0000-4000-8000-0000000000d1",
+		"018f0000-0000-4000-8000-0000000000d2",
+		"018f0000-0000-4000-8000-0000000000d3",
+	}
+	_, err = repository.Mutate(context.Background(), func(state *workstream.State) (bool, error) {
+		for index, id := range ids {
+			state.Sessions = append(state.Sessions, workstream.SessionRecord{
+				ID: id, Backend: shepherd.BackendCodex, InitialPrompt: "task", InitialRoot: root,
+				CreatedAt: now, Launch: workstream.LaunchIntent{Status: workstream.LaunchPending},
+			})
+			workstreamID, position := first.ID, index
+			if index == 2 {
+				workstreamID, position = second.ID, 0
+			}
+			state.Memberships = append(state.Memberships, workstream.Membership{
+				WorkstreamID: workstreamID, SessionID: id, Position: position, JoinedAt: now,
+			})
+		}
+		return true, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.MoveSession(context.Background(), ids[0], second.ID); err != nil {
+		t.Fatal(err)
+	}
+	state, err := repository.Load(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	positions := make(map[string]int)
+	for _, membership := range state.Memberships {
+		positions[membership.SessionID] = membership.Position
+	}
+	if positions[ids[1]] != 0 || positions[ids[2]] != 0 || positions[ids[0]] != 1 {
+		t.Fatalf("positions after move = %v", positions)
+	}
+}
+
 func TestStartPersistsPendingIdentityBeforeSupervisorAndBindsSuccess(t *testing.T) {
 	root := t.TempDir()
 	repository := newMemoryRepository(root)
@@ -310,6 +443,63 @@ func TestReconciliationIsConservativeAndFindsOrphans(t *testing.T) {
 	state, _ = repository.Load(context.Background())
 	if state.Revision != revision {
 		t.Fatalf("idempotent reconciliation advanced revision from %d to %d", revision, state.Revision)
+	}
+}
+
+func TestDegradedRuntimeIsVisibleWithoutRewritingDurableState(t *testing.T) {
+	root := t.TempDir()
+	repository := newMemoryRepository(root)
+	id := "018f0000-0000-4000-8000-000000000027"
+	created := time.Unix(1_700_000_100, 0).UTC()
+	_, err := repository.Mutate(context.Background(), func(state *workstream.State) (bool, error) {
+		state.Sessions = append(state.Sessions, workstream.SessionRecord{
+			ID: id, Backend: shepherd.BackendCodex, InitialPrompt: "task", InitialRoot: root,
+			CreatedAt: created, Launch: workstream.LaunchIntent{Status: workstream.LaunchPending},
+		})
+		return true, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision := repository.state.Revision
+	supervisor := &fakeSupervisor{sessions: []shepherd.Session{{
+		ID: id, Name: "shepherd-" + id, PaneID: "%1", Status: shepherd.StatusLive,
+		ObservationError: "invalid backend metadata",
+	}}}
+	controller := New(supervisor, repository, "shepherd-test")
+	snapshot, err := controller.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Sessions) != 1 || snapshot.Sessions[0].Status != StatusDegraded || !snapshot.Sessions[0].Available() {
+		t.Fatalf("degraded projection = %#v", snapshot.Sessions)
+	}
+	state, _ := repository.Load(context.Background())
+	if state.Revision != revision || state.Sessions[0].Launch.Status != workstream.LaunchPending || state.Sessions[0].Launch.Binding != nil {
+		t.Fatalf("degraded observation rewrote durable state: %#v", state.Sessions[0])
+	}
+	if err := controller.Send(context.Background(), id, "hello"); err == nil || !strings.Contains(err.Error(), "degraded") {
+		t.Fatalf("degraded send error = %v", err)
+	}
+	if _, err := controller.AdoptSession(context.Background(), id, ""); err == nil || !strings.Contains(err.Error(), "degraded") {
+		t.Fatalf("degraded adopt error = %v", err)
+	}
+}
+
+func TestCreateWorkstreamRemovesNewEmptyArtifactDirectoryOnMutationFailure(t *testing.T) {
+	root := t.TempDir()
+	repository := newMemoryRepository(root)
+	repository.mutateErr = errors.New("state write failed")
+	controller := New(&fakeSupervisor{}, repository, "shepherd-test")
+	if _, err := controller.CreateWorkstream(context.Background(), "Core", "", []string{root}); err == nil {
+		t.Fatal("CreateWorkstream succeeded despite repository failure")
+	}
+	entries, err := os.ReadDir(repository.ArtifactBase())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("failed workstream left artifacts: %#v", entries)
 	}
 }
 
@@ -529,13 +719,19 @@ func TestDeleteSessionRemovesAbsentRuntimeRecordAndMembership(t *testing.T) {
 				t.Fatal(err)
 			}
 			id := "018f0000-0000-4000-8000-00000000004" + string(rune('1'+index))
+			siblingID := "018f0000-0000-4000-8000-00000000005" + string(rune('1'+index))
 			_, err = repository.Mutate(context.Background(), func(state *workstream.State) (bool, error) {
 				state.Sessions = append(state.Sessions, workstream.SessionRecord{
 					ID: id, Backend: shepherd.BackendClaude, InitialPrompt: "delete me", InitialRoot: root,
 					CreatedAt: now, Launch: workstream.LaunchIntent{Status: workstream.LaunchPending}, Outcome: test.outcome,
+				}, workstream.SessionRecord{
+					ID: siblingID, Backend: shepherd.BackendCodex, InitialPrompt: "keep me", InitialRoot: root,
+					CreatedAt: now, Launch: workstream.LaunchIntent{Status: workstream.LaunchPending},
 				})
 				state.Memberships = append(state.Memberships, workstream.Membership{
-					WorkstreamID: container.ID, SessionID: id, JoinedAt: now,
+					WorkstreamID: container.ID, SessionID: id, Position: 0, JoinedAt: now,
+				}, workstream.Membership{
+					WorkstreamID: container.ID, SessionID: siblingID, Position: 1, JoinedAt: now,
 				})
 				return true, nil
 			})
@@ -556,6 +752,9 @@ func TestDeleteSessionRemovesAbsentRuntimeRecordAndMembership(t *testing.T) {
 			for _, membership := range state.Memberships {
 				if membership.SessionID == id {
 					t.Fatalf("membership remains after deletion: %#v", membership)
+				}
+				if membership.SessionID == siblingID && membership.Position != 0 {
+					t.Fatalf("sibling position after deletion = %d, want 0", membership.Position)
 				}
 			}
 		})

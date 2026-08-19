@@ -151,6 +151,41 @@ func TestValidateRejectsMultipleActiveMemberships(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsInvalidMembershipPositions(t *testing.T) {
+	now := time.Now()
+	root := t.TempDir()
+	container := Workstream{
+		ID: "018f0000-0000-4000-8000-000000000014", Name: "Ordered",
+		ArtifactDir: filepath.Join(root, "ordered"), Roots: []string{root},
+		Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	sessions := []SessionRecord{
+		{ID: "018f0000-0000-4000-8000-000000000015", Backend: "codex", InitialPrompt: "one", InitialRoot: root, CreatedAt: now, Launch: LaunchIntent{Status: LaunchPending}},
+		{ID: "018f0000-0000-4000-8000-000000000016", Backend: "claude", InitialPrompt: "two", InitialRoot: root, CreatedAt: now, Launch: LaunchIntent{Status: LaunchPending}},
+	}
+	for _, test := range []struct {
+		name      string
+		positions [2]int
+	}{
+		{name: "duplicate", positions: [2]int{0, 0}},
+		{name: "gap", positions: [2]int{0, 2}},
+		{name: "negative", positions: [2]int{0, -1}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			state := State{
+				Version: StateVersion, Workstreams: []Workstream{container}, Sessions: sessions,
+				Memberships: []Membership{
+					{WorkstreamID: container.ID, SessionID: sessions[0].ID, Position: test.positions[0], JoinedAt: now},
+					{WorkstreamID: container.ID, SessionID: sessions[1].ID, Position: test.positions[1], JoinedAt: now},
+				},
+			}
+			if err := state.Validate(); err == nil {
+				t.Fatalf("positions %v were accepted", test.positions)
+			}
+		})
+	}
+}
+
 func TestFileStoreLoadMigratesV1FixtureWithoutChangingDomainRevision(t *testing.T) {
 	store := storeFromFixture(t, "state-v1-valid.json")
 	state, err := store.Load(context.Background())
@@ -242,10 +277,8 @@ func TestFileStoreLoadsV2TitleFixture(t *testing.T) {
 	}
 }
 
-// The v3 fixture carries all three states a session can be in: a conversation
-// Shepherd assigned, one it observed, and none at all. A loader that dropped the
-// source, or that silently defaulted an absent registration into a present one,
-// fails here rather than in whatever resumes the wrong conversation.
+// The v3 fixture carries all three states a session can be in and three members
+// whose creation order proves the v4 migration installs newest-first positions.
 func TestFileStoreLoadsV3ConversationFixture(t *testing.T) {
 	store := storeFromFixture(t, "state-v3-valid.json")
 	state, err := store.Load(context.Background())
@@ -271,10 +304,46 @@ func TestFileStoreLoadsV3ConversationFixture(t *testing.T) {
 		t.Fatalf("unregistered conversation = %#v", state.Sessions[2].Conversation)
 	}
 
-	// Loading a current-version file must not rewrite it; only a migration may.
-	persisted := readPersistedState(t, store.Path)
-	if persisted.Revision != 21 {
-		t.Fatalf("persisted revision = %d, want 21", persisted.Revision)
+	positions := make(map[string]int, len(state.Memberships))
+	for _, membership := range state.Memberships {
+		positions[membership.SessionID] = membership.Position
+	}
+	for sessionID, want := range map[string]int{
+		"018f0000-0000-4000-8000-000000000303": 0,
+		"018f0000-0000-4000-8000-000000000302": 1,
+		"018f0000-0000-4000-8000-000000000301": 2,
+	} {
+		if got := positions[sessionID]; got != want {
+			t.Fatalf("migrated position for %s = %d, want %d", sessionID, got, want)
+		}
+	}
+	if persisted := readPersistedState(t, store.Path); persisted.Revision != 21 {
+		t.Fatalf("migration changed domain revision to %d, want 21", persisted.Revision)
+	}
+}
+
+func TestFileStoreLoadsCurrentV4OrderWithoutRewriting(t *testing.T) {
+	store := storeFromFixture(t, "state-v4-valid.json")
+	before, err := os.ReadFile(store.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := store.Load(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Version != StateVersion || state.Revision != 22 || len(state.Memberships) != 2 {
+		t.Fatalf("loaded v4 state = %#v", state)
+	}
+	if state.Memberships[0].Position != 1 || state.Memberships[1].Position != 0 {
+		t.Fatalf("loaded positions = %#v", state.Memberships)
+	}
+	after, err := os.ReadFile(store.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("loading current v4 state rewrote it")
 	}
 }
 
@@ -355,7 +424,9 @@ func TestFileStoreRejectsInvalidVersionedFixturesWithoutRewriting(t *testing.T) 
 		// stripped of the conversation, and written back as if that were v2.
 		{fixture: "state-v2-rejects-v3-field.json", want: `unknown field "conversation"`},
 		{fixture: "state-v3-unknown-field.json", want: `unknown field "surprise"`},
-		{fixture: "state-v4-future.json", want: "newer than supported version 3"},
+		{fixture: "state-v3-rejects-v4-field.json", want: `unknown field "position"`},
+		{fixture: "state-v4-unknown-field.json", want: `unknown field "surprise"`},
+		{fixture: "state-v5-future.json", want: "newer than supported version 4"},
 	}
 	for _, test := range tests {
 		t.Run(test.fixture, func(t *testing.T) {

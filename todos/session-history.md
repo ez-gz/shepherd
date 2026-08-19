@@ -1,8 +1,10 @@
 # Session history
 
-Status: shipped for Claude as `shepherd history`; Codex remains unsupported. Raised by
-a pilot during testing, which correctly reported that `shepherd peek` shows only the
-current terminal frame and not what a session did.
+Status: shipped for Claude as `shepherd history`; Codex remains unsupported by
+choice. A dedicated Codex parser is compatibility cleanup, not a product feature,
+unless a runner-neutral user experience later requires the same structured record.
+Raised by a pilot during testing, which correctly reported that `shepherd peek`
+shows only the current terminal frame and not what a session did.
 
 ## What shipped
 
@@ -44,7 +46,7 @@ right id from `control.Session.ConversationID`, which prefers the registered
 conversation and falls back to the durable id. Provenance does not gate it: an
 `observed` id is precisely the one matched against a file on disk.
 
-## Still open
+## Optional compatibility cleanup
 
 Codex history. **The blocker named here has since been removed** — see
 [session-resume.md](session-resume.md). This document said Codex history needed
@@ -53,12 +55,16 @@ chose". Codex reports the id it chose, in the `session_meta` record of its
 rollout, and Shepherd now identifies and registers that id per session on a unique
 launch-directory / time-window / verbatim-prompt match.
 
-So the identification problem is solved and only the parsing is left. Making
-`shepherd history` work for Codex now means reading the rollout's `response_item`
-records — a different record vocabulary from Claude's, with its own ways to be
-wrong — and locating the file from the registered conversation id instead of
-scanning. Until someone does that, `shepherd history` still says `unsupported` for
-Codex, and the reason it gives is now out of date rather than wrong in kind.
+So the identification problem is solved and only the parsing is left. That does
+not make parsing obligatory. Reading Codex rollout `response_item` records would
+add a second provider-specific vocabulary and maintenance boundary merely to make
+one existing command symmetrical. Leave `shepherd history` honestly
+`unsupported` for Codex unless a concrete, runner-neutral workflow needs it.
+
+If that workflow appears, locate the rollout from the registered conversation id
+instead of scanning and introduce the smallest shared projection required by the
+workflow. Do not make a normalized transcript or completed-turn ledger a product
+contract only because two native file formats exist.
 
 ## The problem
 

@@ -51,8 +51,9 @@ after validation.
 5. Install the validated directory as `~/.shepherd`, then run
    `shepherd init --force` to write the current manager instructions.
 6. Continue a transferred conversation with
-   `shepherd resume SESSION MESSAGE`. This creates a new Shepherd session and
-   leaves the transferred Heikou record as history.
+   `shepherd resume SESSION MESSAGE`. A sole live Codex owner receives the
+   message in place; otherwise this creates a new Shepherd session and leaves
+   the transferred Heikou record as history.
 
 Keep the backup and old binary until the user has checked their workstreams,
 notes, and every conversation they intended to resume. Removing either is a

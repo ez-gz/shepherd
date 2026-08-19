@@ -1,4 +1,4 @@
 interface:
   display_name: "Learn Shepherd"
-  short_description: "Walk through the core Shepherd workflow"
+  short_description: "Learn Shepherd's dashboard and topology"
   default_prompt: "Use $learn-shepherd to guide me through my first Shepherd workstream and session."

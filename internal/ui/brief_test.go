@@ -165,9 +165,9 @@ func TestConfiguredSourceReachesTheRowMarkedApproximate(t *testing.T) {
 	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.width, model.height = 120, 30
 	model.settings.Brief = config.BriefConfig{
-		Lead:    []string{"status", "title", "prompt"},
+		Lead:    []string{"agent-status", "title", "prompt"},
 		Detail:  []string{"latest"},
-		Sources: map[string]config.BriefSourceConfig{"status": {Command: []string{"agent-status"}, IntervalSeconds: 5, TimeoutSeconds: 2}},
+		Sources: map[string]config.BriefSourceConfig{"agent-status": {Command: []string{"agent-status"}, IntervalSeconds: 5, TimeoutSeconds: 2}},
 	}
 
 	session := briefTestSession("Fix flaky OAuth tests", "investigate", "also check the retry")
@@ -180,7 +180,7 @@ func TestConfiguredSourceReachesTheRowMarkedApproximate(t *testing.T) {
 	}
 
 	model.briefObservations = brief.Observations{
-		{Session: session.ID, Source: "status"}: {Text: "esc to interrupt"},
+		{Session: session.ID, Source: "agent-status"}: {Text: "esc to interrupt"},
 	}
 	plain := ansi.Strip(model.renderSessionRow(session, false))
 	if !strings.Contains(plain, briefApproximateMark+"esc to interrupt") {
@@ -229,13 +229,13 @@ func TestReloadingSettingsDropsARemovedSourcesText(t *testing.T) {
 	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.width, model.height = 120, 30
 	model.settings.Brief = config.BriefConfig{
-		Lead:    []string{"status", "title"},
-		Sources: map[string]config.BriefSourceConfig{"status": {Command: []string{"agent-status"}, IntervalSeconds: 5, TimeoutSeconds: 2}},
+		Lead:    []string{"agent-status", "title"},
+		Sources: map[string]config.BriefSourceConfig{"agent-status": {Command: []string{"agent-status"}, IntervalSeconds: 5, TimeoutSeconds: 2}},
 	}
 	session := briefTestSession("Fix flaky OAuth tests", "investigate", "")
 	model.snapshot.Sessions = []control.Session{session}
 	model.setSnapshot(model.snapshot)
-	model.briefObservations = brief.Observations{{Session: session.ID, Source: "status"}: {Text: "esc to interrupt"}}
+	model.briefObservations = brief.Observations{{Session: session.ID, Source: "agent-status"}: {Text: "esc to interrupt"}}
 
 	updated, _ := model.Update(settingsMsg{settings: config.Default()})
 	reloaded, ok := updated.(Model)
@@ -280,8 +280,8 @@ func TestBriefSourceHealthIsVisibleInSettings(t *testing.T) {
 	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	model.width, model.height = 120, 40
 	model.settings.Brief = config.BriefConfig{
-		Lead:    []string{"status", "title"},
-		Sources: map[string]config.BriefSourceConfig{"status": {Command: []string{"agent-status"}, IntervalSeconds: 5, TimeoutSeconds: 2}},
+		Lead:    []string{"agent-status", "title"},
+		Sources: map[string]config.BriefSourceConfig{"agent-status": {Command: []string{"agent-status"}, IntervalSeconds: 5, TimeoutSeconds: 2}},
 	}
 
 	if healthy := ansi.Strip(strings.Join(model.briefHealthLines(), "\n")); healthy != "" {

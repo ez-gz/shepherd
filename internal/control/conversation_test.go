@@ -16,8 +16,34 @@ import (
 // so a test can assert on the resume target that reached the runtime boundary.
 type startingSupervisor struct {
 	fakeSupervisor
-	mu       sync.Mutex
-	requests []shepherd.StartRequest
+	mu          sync.Mutex
+	requests    []shepherd.StartRequest
+	sentRuntime shepherd.Session
+	sentMessage string
+}
+
+func (s *startingSupervisor) Send(_ context.Context, runtime shepherd.Session, message string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sentRuntime, s.sentMessage = runtime, message
+	return nil
+}
+
+func (s *startingSupervisor) setRuntimeStatus(t *testing.T, id string, status shepherd.Status) {
+	t.Helper()
+	s.fakeSupervisor.mu.Lock()
+	defer s.fakeSupervisor.mu.Unlock()
+	for index := range s.fakeSupervisor.sessions {
+		if s.fakeSupervisor.sessions[index].ID == id {
+			s.fakeSupervisor.sessions[index].Status = status
+			if status != shepherd.StatusLive {
+				code := 0
+				s.fakeSupervisor.sessions[index].ExitCode = &code
+			}
+			return
+		}
+	}
+	t.Fatalf("runtime %s was not found", id)
 }
 
 func newStartingSupervisor() *startingSupervisor {
@@ -282,6 +308,9 @@ func TestResumingCodexResolvesFirstThenCarriesTheIdItFound(t *testing.T) {
 	})
 	controller, supervisor, repository := conversationController(t, resolver)
 	original := mustStart(t, controller, shepherd.BackendCodex, "start the work")
+	// An exited owner makes this a true native resume. A live owner takes the
+	// attach/send path tested separately below.
+	supervisor.setRuntimeStatus(t, original.ID, shepherd.StatusExited)
 
 	resumed, err := controller.ResumeSession(context.Background(), original.ID, "carry on")
 	if err != nil {
@@ -305,6 +334,111 @@ func TestResumingCodexResolvesFirstThenCarriesTheIdItFound(t *testing.T) {
 	if after.Conversation == nil || after.Conversation.Source != workstream.ConversationAssigned ||
 		after.Conversation.ID != "019e6d0c-14bd-7792-91d2-f684a8dc6e80" {
 		t.Fatalf("resumed conversation = %#v", after.Conversation)
+	}
+}
+
+func TestResumingCodexSendsToTheSoleLiveConversationOwner(t *testing.T) {
+	const conversationID = "019e6d0c-14bd-7792-91d2-f684a8dc6e80"
+	resolver := ResolveConversationFunc(func(context.Context, workstream.SessionRecord) (string, error) {
+		return conversationID, nil
+	})
+	controller, supervisor, repository := conversationController(t, resolver)
+	original := mustStart(t, controller, shepherd.BackendCodex, "start the work")
+	started := len(supervisor.requests)
+
+	continued, err := controller.ResumeSession(context.Background(), original.ID, "carry on")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if continued.ID != original.ID || !continued.ContinuedExisting {
+		t.Fatalf("continued session = %#v, want the live original", continued)
+	}
+	if len(supervisor.requests) != started {
+		t.Fatal("resume launched a second writer for a conversation with a live owner")
+	}
+	supervisor.mu.Lock()
+	sentRuntime, sentMessage := supervisor.sentRuntime, supervisor.sentMessage
+	supervisor.mu.Unlock()
+	if sentRuntime.ID != original.ID || sentMessage != "carry on" {
+		t.Fatalf("send = runtime %q message %q", sentRuntime.ID, sentMessage)
+	}
+	state, err := repository.Load(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Sessions) != 1 || state.Sessions[0].Conversation == nil ||
+		state.Sessions[0].Conversation.ID != conversationID {
+		t.Fatalf("state after live continuation = %#v", state.Sessions)
+	}
+}
+
+func TestResumingCodexRefusesMultipleLiveConversationOwners(t *testing.T) {
+	const conversationID = "019e6d0c-14bd-7792-91d2-f684a8dc6e80"
+	resolver := ResolveConversationFunc(func(context.Context, workstream.SessionRecord) (string, error) {
+		return conversationID, nil
+	})
+	controller, supervisor, _ := conversationController(t, resolver)
+	original := mustStart(t, controller, shepherd.BackendCodex, "start the work")
+	supervisor.setRuntimeStatus(t, original.ID, shepherd.StatusExited)
+	second, err := controller.ResumeSession(context.Background(), original.ID, "resume while unowned")
+	if err != nil {
+		t.Fatal(err)
+	}
+	supervisor.setRuntimeStatus(t, original.ID, shepherd.StatusLive)
+	started := len(supervisor.requests)
+
+	_, err = controller.ResumeSession(context.Background(), second.ID, "this must fail closed")
+	if err == nil || !strings.Contains(err.Error(), "multiple live writers") {
+		t.Fatalf("error = %v, want duplicate-owner refusal", err)
+	}
+	if len(supervisor.requests) != started {
+		t.Fatal("duplicate-owner refusal launched another runtime")
+	}
+}
+
+func TestForkingCodexExplicitlyCreatesANewUnregisteredConversation(t *testing.T) {
+	const conversationID = "019e6d0c-14bd-7792-91d2-f684a8dc6e80"
+	resolver := ResolveConversationFunc(func(context.Context, workstream.SessionRecord) (string, error) {
+		return conversationID, nil
+	})
+	controller, supervisor, repository := conversationController(t, resolver)
+	original := mustStart(t, controller, shepherd.BackendCodex, "start the work")
+
+	forked, err := controller.ForkSession(context.Background(), original.ID, "try the other approach")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := supervisor.lastRequest(t)
+	if !request.Fork || request.Resume != conversationID {
+		t.Fatalf("fork request = %#v", request)
+	}
+	if forked.ID == original.ID {
+		t.Fatal("fork reused the source durable identity")
+	}
+	state, err := repository.Load(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, ok := state.Session(forked.ID)
+	if !ok {
+		t.Fatal("fork was not recorded")
+	}
+	if record.Conversation != nil {
+		t.Fatalf("fork recorded its source as the new conversation: %#v", record.Conversation)
+	}
+}
+
+func TestForkRefusesRunnersWithoutTheExplicitCodexOwnershipContract(t *testing.T) {
+	controller, supervisor, _ := conversationController(t, ConversationResolver(nil))
+	original := mustStart(t, controller, shepherd.BackendClaude, "start the work")
+	started := len(supervisor.requests)
+
+	_, err := controller.ForkSession(context.Background(), original.ID, "branch")
+	if err == nil || !strings.Contains(err.Error(), "only for codex") {
+		t.Fatalf("error = %v", err)
+	}
+	if len(supervisor.requests) != started {
+		t.Fatal("refused fork launched a runtime")
 	}
 }
 

@@ -30,6 +30,9 @@ const (
 	DefaultRunner = "SHEPHERD_DEFAULT_RUNNER"
 	CodexBinary   = "SHEPHERD_CODEX_BIN"
 	ClaudeBinary  = "SHEPHERD_CLAUDE_BIN"
+	// OpenAIAPIKey opts an explicitly enabled automatic-title observer into one
+	// Responses API call per session. Without it Shepherd makes no network call.
+	OpenAIAPIKey = "OPENAI_API_KEY"
 
 	// SessionID is set by Shepherd into an agent's environment rather than read
 	// from the user, so a running agent can identify its own session.
@@ -61,6 +64,7 @@ var Names = []string{
 	Home, Config, State, Data,
 	TmuxSocket,
 	DefaultRunner, CodexBinary, ClaudeBinary,
+	OpenAIAPIKey,
 	SessionID, SessionRunner, SessionState, SessionRoot, SessionTitle,
 }
 
