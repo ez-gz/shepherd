@@ -45,6 +45,7 @@ type Stub struct {
 	CreateWorkstreamFunc     func(context.Context, string, string, []string) (workstream.Workstream, error)
 	RenameWorkstreamFunc     func(context.Context, string, string) error
 	ReorderWorkstreamFunc    func(context.Context, string, int) (bool, error)
+	ReorderSessionFunc       func(context.Context, string, int) (bool, error)
 	ArchiveWorkstreamFunc    func(context.Context, string) error
 	MoveSessionFunc          func(context.Context, string, string) error
 	AdoptSessionFunc         func(context.Context, string, string) (control.Session, error)
@@ -171,6 +172,13 @@ func (s *Stub) RenameWorkstream(ctx context.Context, id, name string) error {
 func (s *Stub) ReorderWorkstream(ctx context.Context, id string, delta int) (bool, error) {
 	if s.ReorderWorkstreamFunc != nil {
 		return s.ReorderWorkstreamFunc(ctx, id, delta)
+	}
+	return true, nil
+}
+
+func (s *Stub) ReorderSession(ctx context.Context, id string, delta int) (bool, error) {
+	if s.ReorderSessionFunc != nil {
+		return s.ReorderSessionFunc(ctx, id, delta)
 	}
 	return true, nil
 }

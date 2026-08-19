@@ -309,8 +309,9 @@ directory a coherent working root for an agent that maintains Shepherd's own
 state: it can see its instructions, its notes, and its artifacts without being
 handed three unrelated paths.
 
-State schema v2 adds the optional durable session title, and v3 the optional
-native runner conversation. The loader applies explicit ordered migrations, one
+State schema v2 adds the optional durable session title, v3 the optional native
+runner conversation, and v4 a dense position on named-workstream membership.
+The loader applies explicit ordered migrations, one
 adjacent version at a time: it strictly validates the claimed older shape,
 migrates in memory, and atomically installs the current version while preserving
 the domain revision. Each superseded version keeps its own decoder, so a file
@@ -318,12 +319,18 @@ claiming v2 rejects the v3 `conversation` field rather than absorbing it and
 writing it back stripped. Invalid states, future versions, and fields unknown to
 the claimed schema are rejected rather than rewritten.
 
-Both migrations are schema-only and back-fill nothing. Back-filling the
+The first two migrations are schema-only and back-fill nothing. Back-filling the
 conversation would be *possible* for Claude — the durable id is the conversation
 id — and is deliberately not done, because a v2 record cannot distinguish a
 session that ran from one whose launch failed before Claude wrote anything. The
 result would be registrations that resume nothing while carrying the same
 provenance as ones that work.
+
+The v3-to-v4 migration installs newest-created-first membership positions, with
+`JoinedAt` and legacy slice order as deterministic tie-breakers. It preserves
+the domain revision. Once migrated, new and moved-in members append and every
+removal compacts the source positions.
+
 The workstream array order is also its durable display order; moving an active
 workstream swaps it with an active neighbor in one atomic state mutation and
 does not require a separate position field or schema migration.
@@ -335,7 +342,8 @@ The deliberately small durable model is:
 - `SessionRecord`: caller-owned launch ID, optional user-authored display title,
   backend, initial prompt/root, creation time, launch intent/binding, durable
   terminal outcome, and the optional native runner conversation; and
-- `Membership`: one optional active-workstream membership per durable session.
+- `Membership`: one optional active-workstream membership per durable session,
+  with a dense zero-based position inside that workstream.
 
 ## Runner conversations, and why they carry a provenance
 
@@ -572,8 +580,9 @@ Organize actions are contextual chords on that same list. Each carries a verb
 and reads the selected row for its noun: `Ctrl-R` renames a workstream or edits
 a durable session title, `Ctrl-T` marks a session and then moves it into the
 next selected workstream (explicitly adopting an orphan when that is what it
-is), and `Shift-Up`/`Shift-Down` either reorders a named workstream durably or
-walks a session to the adjacent workstream with Ungrouped pinned last.
+is), and `Shift-Up`/`Shift-Down` reorders either a named workstream or a member
+session durably. Membership changes remain the explicit `Ctrl-T` operation;
+Ungrouped retains its live/newest projection.
 `Ctrl-N` creates a workstream rooted at the launch directory, and `Ctrl-O`
 edits the selected workstream's roots.
 
@@ -849,9 +858,10 @@ The automated suite covers:
 - literal prompts/messages containing shell-looking syntax;
 - strict JSON settings, context-aware composer bindings, and exact configured
   argv transport through the trusted resolver;
-- strict v1-to-v2 and v2-to-v3 state migration fixtures, durable title and
-  conversation validation, superseded decoders refusing a newer schema's fields,
-  and unchanged domain revisions for schema-only migration;
+- strict v1-to-v2, v2-to-v3, and v3-to-v4 state migration fixtures; durable
+  title, conversation, and dense membership-position validation; superseded
+  decoders refusing a newer schema's fields; and unchanged domain revisions
+  during migration;
 - conversation registration: assigned at launch for Claude without consulting
   any file, absent for a fresh Codex session, observed only on a unique
   directory/window/prompt match, refused on ambiguity, idempotent once written,

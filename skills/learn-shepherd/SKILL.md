@@ -106,6 +106,7 @@ text, and move mark, then parks on Ungrouped. Quitting is `Ctrl-C`.
 | Title or clear a durable session | Select it, press `Ctrl-R`, then save a title or an empty value |
 | Move a session into a workstream | `Ctrl-T` on the session, select the workstream, `Ctrl-T` again |
 | Reorder a named workstream | Select it, then `Shift-Up` / `Shift-Down` |
+| Reorder a session within its workstream | Select it, then `Shift-Up` / `Shift-Down`; Ungrouped keeps live/newest order |
 | Archive a workstream | Select it and press `Ctrl-V` twice; the first press says what happens, its sessions move to Ungrouped and keep running, and any other key cancels |
 | Add, edit, or remove a root | Select the workstream, press `Ctrl-O` to open its roots; `Ctrl-O` again walks to the next one and then to an empty slot that adds. `Enter` saves; an empty draft removes after one more `Enter` |
 | Start a session | Type a task, then `Enter` |
@@ -119,7 +120,8 @@ text, and move mark, then parks on Ungrouped. Quitting is `Ctrl-C`.
 
 Mention the CLI equivalents when useful: `shepherd quickstart`, `shepherd list`,
 `shepherd spawn -r RUNNER -C DIR -w WORKSTREAM LABEL`, `shepherd send ID MESSAGE`,
-`shepherd attach ID`, `shepherd stop ID`, and `shepherd help`. Add `--json` to `shepherd list`, `shepherd spawn`,
+`shepherd attach ID`, `shepherd reorder ID --up|--down`, `shepherd stop ID`, and
+`shepherd help`. Add `--json` to `shepherd list`, `shepherd spawn`,
 or `shepherd send` when a machine-readable result is useful.
 
 Do not stop, delete, archive, or move the user's sessions without explicit

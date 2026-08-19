@@ -161,7 +161,7 @@ func (m Model) helpContentLines() []string {
 		{"Ctrl-T · session", "Mark it for a move, or unmark it. The mark shows as ◆ and survives moving the cursor."},
 		{"Ctrl-T · workstream", "Move the marked session here. An orphaned runtime is explicitly adopted instead, which a named workstream accepts and Ungrouped does not."},
 		{"Shift-↑ / Shift-↓ · workstream", "Move a named workstream one position up or down; the order is durable."},
-		{"Shift-↑ / Shift-↓ · session", "Move it to the previous or next workstream, with Ungrouped last in the walk."},
+		{"Shift-↑ / Shift-↓ · session", "Move it one position within its named workstream; the order is durable. Ungrouped keeps live/newest order."},
 		{"Ctrl-O", "Edit the selected workstream's roots. The composer opens on the root Shift-Tab has selected; press Ctrl-O again to walk to the next one and then to an empty slot that adds."},
 		{"Ctrl-O · committing", "Enter saves the path shown. An empty draft removes that root and asks once more first; a workstream always keeps its last root."},
 		{archiveChordLabel + " · workstream", "Archive it, which takes it off the dashboard. The first press says what will happen and the second does it; every other key cancels. Archiving is organization rather than deletion or shutdown: no session record is removed and no runtime is stopped, so its sessions carry on running under Ungrouped. shepherd ws archive still does the same thing from the CLI."},

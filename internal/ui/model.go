@@ -584,6 +584,16 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.notice = "workstream is already " + boundary
 			}
+		case "session_reorder":
+			direction, boundary := "down", "last"
+			if message.delta < 0 {
+				direction, boundary = "up", "first"
+			}
+			if message.moved {
+				m.notice = "moved " + format.ShortID(message.sessionID) + " " + direction
+			} else {
+				m.notice = "session is already " + boundary + " in this workstream"
+			}
 		case "archive":
 			// Its sessions are in Ungrouped now, so the cursor follows them there
 			// rather than landing on whichever row inherited the vacated index.
@@ -1392,9 +1402,9 @@ func archiveConsequence(sessions []control.Session) string {
 	return fmt.Sprintf("%s · %d live keep running", moved, live)
 }
 
-// reorderSelection moves a workstream in the durable display order, or moves a
-// session to the adjacent workstream. Sessions have no durable order inside a
-// workstream to change; see todos/session-ordering.md.
+// reorderSelection moves a named workstream or one of its member sessions in
+// the corresponding durable display order. Cross-workstream moves remain the
+// explicit Ctrl-T operation, so an ordering chord never changes membership.
 func (m Model) reorderSelection(delta int) (tea.Model, tea.Cmd) {
 	row, ok := m.selectedRow()
 	if !ok {
@@ -1410,44 +1420,17 @@ func (m Model) reorderSelection(delta int) (tea.Model, tea.Cmd) {
 		m.notice = "moving workstream…"
 		return m, m.reorderWorkstreamCmd(row.workstreamID, delta)
 	case rowSession:
-		destination, ok := m.adjacentWorkstream(row.workstreamID, delta)
-		if !ok {
-			edge := "first"
-			if delta > 0 {
-				edge = "last"
-			}
-			m.errorText = "already in the " + edge + " workstream"
+		if row.workstreamID == "" {
+			m.errorText = "Ungrouped sessions use live/newest order; move this session into a workstream to order it"
 			return m, nil
 		}
 		m.busy = true
-		m.notice = "moving " + format.ShortID(row.sessionID) + "…"
-		return m, m.moveSessionCmd(row.sessionID, destination)
+		m.notice = "reordering " + format.ShortID(row.sessionID) + "…"
+		return m, m.reorderSessionCmd(row.sessionID, delta)
 	case rowOrphan:
-		m.errorText = "adopt this runtime with Ctrl-T before moving it"
+		m.errorText = "adopt this runtime with Ctrl-T before ordering it"
 	}
 	return m, nil
-}
-
-// adjacentWorkstream walks the durable workstream order with Ungrouped pinned
-// at the end, so Shift-Up and Shift-Down step a session through exactly the
-// destinations the list already displays, in the order it displays them.
-func (m Model) adjacentWorkstream(current string, delta int) (string, bool) {
-	order := make([]string, 0, len(m.overview.workstreams)+1)
-	for _, item := range m.overview.workstreams {
-		order = append(order, item.ID)
-	}
-	order = append(order, "")
-	for index, id := range order {
-		if id != current {
-			continue
-		}
-		next := index + delta
-		if next < 0 || next >= len(order) {
-			return "", false
-		}
-		return order[next], true
-	}
-	return "", false
 }
 
 func (m *Model) beginComposerEdit(mode composerEditMode, target, value string) {
@@ -2539,6 +2522,15 @@ func (m Model) reorderWorkstreamCmd(id string, delta int) tea.Cmd {
 		defer cancel()
 		moved, err := m.controller.ReorderWorkstream(ctx, id, delta)
 		return workstreamMsg{action: "reorder", workstreamID: id, delta: delta, moved: moved, err: err}
+	}
+}
+
+func (m Model) reorderSessionCmd(id string, delta int) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+		defer cancel()
+		moved, err := m.controller.ReorderSession(ctx, id, delta)
+		return workstreamMsg{action: "session_reorder", sessionID: id, delta: delta, moved: moved, err: err}
 	}
 }
 

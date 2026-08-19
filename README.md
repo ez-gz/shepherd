@@ -113,7 +113,7 @@ key never depends on remembering which one you meant:
 | `Ctrl-R` | Rename the selected workstream, or edit/clear the selected session's durable title |
 | `Ctrl-T` | Mark the selected session for a move; on a workstream, move the marked session there or adopt an orphan |
 | `Ctrl-V` twice on a workstream | Archive it off the dashboard. The first press names what happens and the second does it; its sessions move to Ungrouped and keep running, and any other key cancels |
-| `Shift-Up` / `Shift-Down` | Reorder a named workstream, or move a session to the adjacent workstream |
+| `Shift-Up` / `Shift-Down` | Reorder a named workstream, or reorder a session within its named workstream; Ungrouped keeps live/newest order |
 | `Up` / `Down` | Select a workstream or session, or move between multiline composer rows |
 | `Option-Up` / `Option-Down` | Jump the selection to the previous or next workstream, passing over the sessions between |
 | `Ctrl-G` | Enter resize mode; `Up` grows the lower pane, `Down` shows more sessions, `r` resets, and `Esc` exits |
@@ -221,6 +221,7 @@ shepherd ws rename "API work" "Public API"
 shepherd ws reorder "Public API" --up
 shepherd title a1b2c3 "OAuth retry investigation"
 shepherd move a1b2c3 --workstream "Public API"
+shepherd reorder a1b2c3 --up
 shepherd move a1b2c3 --ungrouped
 shepherd adopt a1b2c3 -w "Public API"
 shepherd peek a1b2c3
@@ -363,7 +364,7 @@ followed by two honest system groups:
 Organizing is done in place. Each chord carries a verb and reads the selected
 row for its noun, so one key covers both nouns it could apply to: `Ctrl-R`
 renames a workstream or retitles a session, and `Shift-Up`/`Shift-Down`
-reorders a named workstream or walks a session to the adjacent one. `Ctrl-N`
+reorders a named workstream or a member session within that workstream. `Ctrl-N`
 creates a workstream. `Ctrl-T` marks a session with `◆` and moves it into the
 next workstream you select, adopting an orphan explicitly when that is what it
 is. The synthetic Ungrouped and Orphaned sections remain fixed after named
@@ -421,9 +422,11 @@ Workstream state is separate from settings. It remains a versioned, locked JSON
 sidecar at `~/.shepherd/state.json`; ordinary workstream files live in
 `~/.shepherd/workstreams/<id>/`. State updates are serialized with a
 local advisory lock so CLI commands and the dashboard cannot overwrite one
-another. State schema v3 stores durable titles and native conversation IDs. A
-valid v1 or v2 file is validated and atomically migrated without manufacturing
-a domain revision; future or invalid versions are rejected.
+another. State schema v4 stores durable titles, native conversation IDs, and a
+dense position for each named-workstream membership. Valid v1-v3 files are
+validated and atomically migrated without manufacturing a domain revision;
+future or invalid versions are rejected. New and moved-in members append to the
+bottom; Ungrouped sessions intentionally retain the live/newest projection.
 
 ## The Shepherd directory
 

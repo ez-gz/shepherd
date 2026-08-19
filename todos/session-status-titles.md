@@ -4,9 +4,9 @@ Status: durable titles, optional ephemeral automatic titles, and authoritative
 native status are shipped. Returned/seen attention state remains deferred until
 stable completed-turn identities are part of the projection.
 
-Current implementation: state schema v3 stores an optional user-owned session
-title. Rows render a **brief** whose lead is that title, then an opted-in
-process-local automatic title, falling back to the initial prompt. Its detail
+Current implementation: state schema v4 retains the optional user-owned session
+title introduced in v2. Rows render a **brief** whose lead is that title, then
+an opted-in process-local automatic title, falling back to the initial prompt. Its detail
 prefers bounded runner-published native status, then transcript activity and the
 latest user message successfully sent through Shepherd. Native status and
 automatic titles never enter `state.json`.

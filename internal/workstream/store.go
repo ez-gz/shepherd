@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/ez-gz/shepherd/internal/env"
@@ -177,7 +178,7 @@ type stateV1 struct {
 	Revision    uint64            `json:"revision"`
 	Workstreams []Workstream      `json:"workstreams"`
 	Sessions    []sessionRecordV1 `json:"sessions"`
-	Memberships []Membership      `json:"memberships"`
+	Memberships []membershipV3    `json:"memberships"`
 }
 
 type sessionRecordV1 struct {
@@ -199,7 +200,24 @@ type stateV2 struct {
 	Revision    uint64            `json:"revision"`
 	Workstreams []Workstream      `json:"workstreams"`
 	Sessions    []sessionRecordV2 `json:"sessions"`
-	Memberships []Membership      `json:"memberships"`
+	Memberships []membershipV3    `json:"memberships"`
+}
+
+// stateV3 and membershipV3 preserve the exact last schema before membership
+// ordering. In particular, a file claiming v1-v3 must reject the v4 position
+// field rather than accepting and later rewriting it under an older version.
+type stateV3 struct {
+	Version     int             `json:"version"`
+	Revision    uint64          `json:"revision"`
+	Workstreams []Workstream    `json:"workstreams"`
+	Sessions    []SessionRecord `json:"sessions"`
+	Memberships []membershipV3  `json:"memberships"`
+}
+
+type membershipV3 struct {
+	WorkstreamID string    `json:"workstream_id"`
+	SessionID    string    `json:"session_id"`
+	JoinedAt     time.Time `json:"joined_at"`
 }
 
 type sessionRecordV2 struct {
@@ -216,7 +234,7 @@ type sessionRecordV2 struct {
 func (legacy stateV2) state() State {
 	state := State{
 		Version: legacy.Version, Revision: legacy.Revision,
-		Workstreams: legacy.Workstreams, Memberships: legacy.Memberships,
+		Workstreams: legacy.Workstreams, Memberships: upgradeMemberships(legacy.Memberships),
 		Sessions: make([]SessionRecord, 0, len(legacy.Sessions)),
 	}
 	for _, record := range legacy.Sessions {
@@ -232,7 +250,7 @@ func (legacy stateV2) state() State {
 func (legacy stateV1) state() State {
 	state := State{
 		Version: legacy.Version, Revision: legacy.Revision,
-		Workstreams: legacy.Workstreams, Memberships: legacy.Memberships,
+		Workstreams: legacy.Workstreams, Memberships: upgradeMemberships(legacy.Memberships),
 		Sessions: make([]SessionRecord, 0, len(legacy.Sessions)),
 	}
 	for _, record := range legacy.Sessions {
@@ -243,6 +261,24 @@ func (legacy stateV1) state() State {
 		})
 	}
 	return state
+}
+
+func (legacy stateV3) state() State {
+	return State{
+		Version: legacy.Version, Revision: legacy.Revision,
+		Workstreams: legacy.Workstreams, Sessions: legacy.Sessions,
+		Memberships: upgradeMemberships(legacy.Memberships),
+	}
+}
+
+func upgradeMemberships(legacy []membershipV3) []Membership {
+	memberships := make([]Membership, 0, len(legacy))
+	for _, item := range legacy {
+		memberships = append(memberships, Membership{
+			WorkstreamID: item.WorkstreamID, SessionID: item.SessionID, JoinedAt: item.JoinedAt,
+		})
+	}
+	return memberships
 }
 
 func decodeStoredState(data []byte) (State, error) {
@@ -273,6 +309,12 @@ func decodeStoredState(data []byte) (State, error) {
 		}
 		return legacy.state(), nil
 	case 3:
+		var legacy stateV3
+		if err := decodeStrictState(data, &legacy); err != nil {
+			return State{}, err
+		}
+		return legacy.state(), nil
+	case 4:
 		var state State
 		if err := decodeStrictState(data, &state); err != nil {
 			return State{}, err
@@ -301,6 +343,7 @@ type stateMigration struct {
 var orderedStateMigrations = []stateMigration{
 	{from: 1, to: 2, apply: migrateStateV1ToV2},
 	{from: 2, to: 3, apply: migrateStateV2ToV3},
+	{from: 3, to: 4, apply: migrateStateV3ToV4},
 }
 
 func migrateState(state State) (State, bool, error) {
@@ -368,6 +411,38 @@ func migrateStateV1ToV2(state State) (State, error) {
 // not true.
 func migrateStateV2ToV3(state State) (State, error) {
 	state.Version = 3
+	return state, nil
+}
+
+// migrateStateV3ToV4 makes the implicit member order durable. The old
+// projection's durable fallback was newest-created first (live state could
+// temporarily promote a row, but does not belong in state.json), so that is
+// the order installed here. JoinedAt breaks equal creation times, and the
+// legacy membership slice is the final stable tie-breaker.
+func migrateStateV3ToV4(state State) (State, error) {
+	createdAt := make(map[string]time.Time, len(state.Sessions))
+	for _, session := range state.Sessions {
+		createdAt[session.ID] = session.CreatedAt
+	}
+	for _, container := range state.Workstreams {
+		indexes := make([]int, 0)
+		for index, membership := range state.Memberships {
+			if membership.WorkstreamID == container.ID {
+				indexes = append(indexes, index)
+			}
+		}
+		sort.SliceStable(indexes, func(i, j int) bool {
+			left, right := state.Memberships[indexes[i]], state.Memberships[indexes[j]]
+			if !createdAt[left.SessionID].Equal(createdAt[right.SessionID]) {
+				return createdAt[left.SessionID].After(createdAt[right.SessionID])
+			}
+			return left.JoinedAt.After(right.JoinedAt)
+		})
+		for position, index := range indexes {
+			state.Memberships[index].Position = position
+		}
+	}
+	state.Version = 4
 	return state, nil
 }
 

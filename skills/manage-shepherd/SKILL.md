@@ -88,6 +88,7 @@ shepherd title SESSION "A durable name"
 shepherd title SESSION --clear
 shepherd move SESSION --workstream WORKSTREAM
 shepherd move SESSION --ungrouped
+shepherd reorder SESSION --up|--down                    # order within a named workstream
 shepherd adopt SESSION [-w WORKSTREAM]                  # claim an orphaned tmux pane
 shepherd stop SESSION                                   # confirm with the user first
 shepherd delete SESSION --yes                           # confirm with the user first

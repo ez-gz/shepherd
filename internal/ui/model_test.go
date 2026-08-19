@@ -49,6 +49,9 @@ type fakeController struct {
 	reorderedWorkstream    string
 	reorderedDelta         int
 	reorderNoop            bool
+	reorderedSession       string
+	sessionReorderedDelta  int
+	sessionReorderNoop     bool
 	titledSession          string
 	titleValue             string
 	createdWorkstream      string
@@ -93,6 +96,11 @@ func (f *fakeController) SetSessionTitle(_ context.Context, id, title string) er
 func (f *fakeController) ReorderWorkstream(_ context.Context, id string, delta int) (bool, error) {
 	f.reorderedWorkstream, f.reorderedDelta = id, delta
 	return !f.reorderNoop, nil
+}
+
+func (f *fakeController) ReorderSession(_ context.Context, id string, delta int) (bool, error) {
+	f.reorderedSession, f.sessionReorderedDelta = id, delta
+	return !f.sessionReorderNoop, nil
 }
 func (f *fakeController) ArchiveWorkstream(_ context.Context, id string) error {
 	f.archivedWorkstream = id
@@ -776,64 +784,62 @@ func TestShiftArrowsReorderOnlyNamedWorkstreams(t *testing.T) {
 	}
 }
 
-// On a session row the same chord walks the durable workstream order with
-// Ungrouped pinned last, because sessions have no order inside a workstream to
-// change. See todos/session-ordering.md.
-func TestShiftArrowsMoveASessionBetweenAdjacentWorkstreams(t *testing.T) {
+// On a member session the same chord changes only its durable position. Moving
+// between workstreams remains the explicit Ctrl-T mark-and-destination flow.
+func TestShiftArrowsReorderSessionWithinNamedWorkstream(t *testing.T) {
 	model, controller := newTestModel("/tmp", shepherd.BackendCodex)
 	now := time.Now()
 	first := testWorkstream("018f0000-0000-4000-8000-000000000064", "First", []string{"/tmp"}, now)
-	second := testWorkstream("018f0000-0000-4000-8000-000000000065", "Second", []string{"/tmp"}, now)
 	session := testDurableSession("018f0000-0000-4000-8000-000000000066", first.ID, shepherd.BackendCodex, "task", "/tmp", now)
 	model.setSnapshot(control.Snapshot{
-		Workstreams: []workstream.Workstream{first, second},
+		Workstreams: []workstream.Workstream{first},
 		Sessions:    []control.Session{session},
 	})
 	model.selected = sessionRowKey(session)
 	model.restoreSelection()
 
-	updated, cmd := model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown, Mod: tea.ModShift}))
+	updated, cmd := model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyUp, Mod: tea.ModShift}))
 	model = updated.(Model)
 	if cmd == nil {
-		t.Fatal("Shift-Down on a session did not move it")
+		t.Fatal("Shift-Up on a session did not reorder it")
 	}
-	_ = cmd()
-	if controller.movedSession != session.ID || controller.movedTarget != second.ID {
-		t.Fatalf("move = (%q, %q), want (%q, %q)", controller.movedSession, controller.movedTarget, session.ID, second.ID)
+	message := cmd()
+	if controller.reorderedSession != session.ID || controller.sessionReorderedDelta != -1 {
+		t.Fatalf("session reorder = (%q, %d), want (%q, -1)", controller.reorderedSession, controller.sessionReorderedDelta, session.ID)
+	}
+	updated, _ = model.Update(message)
+	model = updated.(Model)
+	if !strings.Contains(model.notice, "moved "+format.ShortID(session.ID)+" up") {
+		t.Fatalf("session reorder notice = %q", model.notice)
 	}
 
-	// One past the last named workstream is Ungrouped, which is a real
-	// destination rather than a wall.
 	model.busy = false
-	session.WorkstreamID = second.ID
-	model.setSnapshot(control.Snapshot{
-		Workstreams: []workstream.Workstream{first, second},
-		Sessions:    []control.Session{session},
-	})
-	model.selected = sessionRowKey(session)
-	model.restoreSelection()
-	_, cmd = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown, Mod: tea.ModShift}))
+	controller.sessionReorderNoop = true
+	updated, cmd = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown, Mod: tea.ModShift}))
+	model = updated.(Model)
 	if cmd == nil {
-		t.Fatal("Shift-Down past the last workstream did not reach Ungrouped")
+		t.Fatal("boundary session reorder did not reach the authoritative controller")
 	}
-	_ = cmd()
-	if controller.movedTarget != "" {
-		t.Fatalf("move target = %q, want Ungrouped", controller.movedTarget)
+	updated, _ = model.Update(cmd())
+	model = updated.(Model)
+	if !strings.Contains(model.notice, "already last") {
+		t.Fatalf("session boundary notice = %q", model.notice)
 	}
 
-	// And Ungrouped is the end of the walk.
+	// Ungrouped intentionally retains the live/newest projection and therefore
+	// has no durable session positions to mutate.
 	model.busy = false
 	session.WorkstreamID = ""
 	model.setSnapshot(control.Snapshot{
-		Workstreams: []workstream.Workstream{first, second},
+		Workstreams: []workstream.Workstream{first},
 		Sessions:    []control.Session{session},
 	})
 	model.selected = sessionRowKey(session)
 	model.restoreSelection()
 	updated, cmd = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown, Mod: tea.ModShift}))
 	model = updated.(Model)
-	if cmd != nil || !strings.Contains(model.errorText, "last workstream") {
-		t.Fatalf("past-the-end move = command %v, error %q", cmd != nil, model.errorText)
+	if cmd != nil || !strings.Contains(model.errorText, "Ungrouped") {
+		t.Fatalf("Ungrouped reorder = command %v, error %q", cmd != nil, model.errorText)
 	}
 }
 

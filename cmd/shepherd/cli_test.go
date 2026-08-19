@@ -141,6 +141,8 @@ func TestRefusalsNeverReachForAController(t *testing.T) {
 		{"title refuses two intents at once", []string{"title", testSessionID, "--clear", "new"}, "not both"},
 		{"move demands a destination", []string{"move", testSessionID}, "usage: shepherd move"},
 		{"move refuses two destinations", []string{"move", testSessionID, "-w", "Parser", "--ungrouped"}, "usage: shepherd move"},
+		{"reorder requires a direction", []string{"reorder", testSessionID}, "--up|--down"},
+		{"reorder refuses both directions", []string{"reorder", testSessionID, "--up", "--down"}, "--up|--down"},
 		{"ws create requires a name", []string{"ws", "create"}, "usage: shepherd ws create"},
 		{"ws rename requires a new name", []string{"ws", "rename", "Parser"}, "usage: shepherd ws rename"},
 		{"ws reorder requires a direction", []string{"ws", "reorder", "Parser"}, "--up|--down"},
@@ -185,6 +187,7 @@ func TestFlagsAreAcceptedAfterPositionals(t *testing.T) {
 		{"ws root add", []string{"ws", "root", "add", "Parser", "/tmp/extra", "--json"}},
 		{"title", []string{"title", testSessionID, "a new title", "--json"}},
 		{"move", []string{"move", testSessionID, "--ungrouped"}},
+		{"reorder", []string{"reorder", testSessionID, "--up"}},
 		{"adopt", []string{"adopt", testSessionID, "-w", "Parser"}},
 		{"delete", []string{"delete", testSessionID, "--yes"}},
 		{"peek", []string{"peek", testSessionID, "--lines", "10"}},
@@ -227,6 +230,8 @@ func TestJSONResultsCarryTheKeysThePilotReads(t *testing.T) {
 			[]string{"status", "session_id", "title"}},
 		{"move", []string{"move", testSessionID, "--ungrouped", "--json"},
 			[]string{"status", "session_id", "workstream_id"}},
+		{"reorder", []string{"reorder", testSessionID, "--up", "--json"},
+			[]string{"status", "session_id", "moved"}},
 		{"adopt", []string{"adopt", testSessionID, "--json"},
 			[]string{"status", "session_id", "workstream_id"}},
 		{"delete", []string{"delete", testSessionID, "--yes", "--json"},
@@ -305,6 +310,24 @@ func TestListJSONReportsTheWholeSnapshot(t *testing.T) {
 	}
 	if len(snapshot.Workstreams) != 1 || snapshot.Workstreams[0].ArtifactDir == "" {
 		t.Errorf("workstreams = %+v, want one carrying its artifact directory", snapshot.Workstreams)
+	}
+}
+
+func TestSessionReorderMapsDirectionAndReportsBoundary(t *testing.T) {
+	h := newHarness(t)
+	capturedID, capturedDelta := "", 0
+	h.service.ReorderSessionFunc = func(_ context.Context, id string, delta int) (bool, error) {
+		capturedID, capturedDelta = id, delta
+		return false, nil
+	}
+	if err := h.app.run([]string{"reorder", testSessionID, "--down"}); err != nil {
+		t.Fatal(err)
+	}
+	if capturedID != testSessionID || capturedDelta != 1 {
+		t.Fatalf("reorder call = (%q, %d), want (%q, 1)", capturedID, capturedDelta, testSessionID)
+	}
+	if !strings.Contains(h.out.String(), "already at the edge") {
+		t.Fatalf("boundary output = %q", h.out.String())
 	}
 }
 

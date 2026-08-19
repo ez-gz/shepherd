@@ -64,6 +64,7 @@ a verb:
 | `CreateWorkstream` | `shepherd ws create` |
 | `RenameWorkstream` | `shepherd ws rename` |
 | `ReorderWorkstream` | `shepherd ws reorder` |
+| `ReorderSession` | `shepherd reorder` |
 | `ArchiveWorkstream` | `shepherd ws archive --yes` |
 | `MoveSession` | `shepherd move` |
 | `AdoptSession` | `shepherd adopt` |
@@ -177,6 +178,7 @@ shepherd ws root rm ID PATH
 
 shepherd title ID [TITLE]              # empty value clears the title
 shepherd move ID --workstream W|--ungrouped
+shepherd reorder ID --up|--down
 shepherd adopt ID [--workstream W]
 shepherd delete ID
 ```
@@ -273,7 +275,7 @@ The honest lever is which verbs exist, not which callers are allowed.
 | --- | --- |
 | `shepherd ws create` / `rename` / `reorder` | `shepherd ws archive` |
 | `shepherd ws root add` | `shepherd ws root rm` / `set` |
-| `shepherd move`, `shepherd adopt`, `shepherd title` | `shepherd delete` |
+| `shepherd move`, `shepherd reorder`, `shepherd adopt`, `shepherd title` | `shepherd delete` |
 | `shepherd send` | `shepherd stop` |
 | notes and artifact files | `state.json` |
 

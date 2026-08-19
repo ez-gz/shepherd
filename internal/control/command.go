@@ -128,6 +128,13 @@ type ReorderWorkstreamAction struct{ Delta int }
 
 func (ReorderWorkstreamAction) commandAction() {}
 
+type ReorderSessionAction struct {
+	SessionID string
+	Delta     int
+}
+
+func (ReorderSessionAction) commandAction() {}
+
 type ArchiveWorkstreamAction struct{}
 
 func (ArchiveWorkstreamAction) commandAction() {}
@@ -301,7 +308,7 @@ func validateActionScope(command Command) error {
 		if command.Scope.Kind != ScopeInstallation {
 			return errors.New("create workstream requires installation scope")
 		}
-	case RenameWorkstreamAction, ReorderWorkstreamAction, ArchiveWorkstreamAction,
+	case RenameWorkstreamAction, ReorderWorkstreamAction, ReorderSessionAction, ArchiveWorkstreamAction,
 		AddRootAction, ReplaceRootAction, RemoveRootAction:
 		return requireWorkstream()
 	case MoveSessionAction:

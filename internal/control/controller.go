@@ -160,6 +160,7 @@ type Service interface {
 	CreateWorkstream(context.Context, string, string, []string) (workstream.Workstream, error)
 	RenameWorkstream(context.Context, string, string) error
 	ReorderWorkstream(context.Context, string, int) (bool, error)
+	ReorderSession(context.Context, string, int) (bool, error)
 	ArchiveWorkstream(context.Context, string) error
 	MoveSession(context.Context, string, string) error
 	AdoptSession(context.Context, string, string) (Session, error)
@@ -235,6 +236,9 @@ func (c *Controller) Execute(ctx context.Context, command Command) (CommandResul
 		return CommandResult{}, c.renameWorkstream(ctx, command.Scope.WorkstreamID, action.Name)
 	case ReorderWorkstreamAction:
 		moved, err := c.reorderWorkstream(ctx, command.Scope.WorkstreamID, action.Delta)
+		return CommandResult{Moved: moved}, err
+	case ReorderSessionAction:
+		moved, err := c.reorderSession(ctx, command.Scope.WorkstreamID, action.SessionID, action.Delta)
 		return CommandResult{Moved: moved}, err
 	case ArchiveWorkstreamAction:
 		return CommandResult{}, c.archiveWorkstream(ctx, command.Scope.WorkstreamID)
@@ -404,7 +408,8 @@ func (c *Controller) startLocked(ctx context.Context, request StartRequest) (Ses
 		state.Sessions = append(state.Sessions, record)
 		if request.WorkstreamID != "" {
 			state.Memberships = append(state.Memberships, workstream.Membership{
-				WorkstreamID: request.WorkstreamID, SessionID: id, JoinedAt: now,
+				WorkstreamID: request.WorkstreamID, SessionID: id,
+				Position: nextMembershipPosition(*state, request.WorkstreamID), JoinedAt: now,
 			})
 		}
 		return true, nil
@@ -884,13 +889,7 @@ func (c *Controller) deleteSessionLocked(ctx context.Context, id string) error {
 		}
 
 		state.Sessions = append(state.Sessions[:index], state.Sessions[index+1:]...)
-		memberships := state.Memberships[:0]
-		for _, membership := range state.Memberships {
-			if membership.SessionID != id {
-				memberships = append(memberships, membership)
-			}
-		}
-		state.Memberships = memberships
+		removeSessionMembership(state, id)
 		return true, nil
 	})
 	return err
@@ -1079,6 +1078,74 @@ func (c *Controller) reorderWorkstream(ctx context.Context, id string, delta int
 	return moved && err == nil, err
 }
 
+// ReorderSession moves a durable member by one position inside its current
+// named workstream. Ungrouped has no membership and intentionally keeps its
+// live/newest projection rather than acquiring a second ordering model.
+func (c *Controller) ReorderSession(ctx context.Context, id string, delta int) (bool, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return false, errors.New("session id is required")
+	}
+	state, err := c.store.Load(ctx)
+	if err != nil {
+		return false, err
+	}
+	if _, ok := state.Session(id); !ok {
+		return false, fmt.Errorf("durable session %q not found", id)
+	}
+	membership, ok := state.MembershipForSession(id)
+	if !ok {
+		return false, fmt.Errorf("session %q is Ungrouped and has no durable position", id)
+	}
+	result, err := c.Execute(ctx, humanCommand(WorkstreamScope(membership.WorkstreamID), ReorderSessionAction{
+		SessionID: id, Delta: delta,
+	}))
+	return result.Moved, err
+}
+
+func (c *Controller) reorderSession(ctx context.Context, workstreamID, sessionID string, delta int) (bool, error) {
+	if delta != -1 && delta != 1 {
+		return false, fmt.Errorf("session reorder delta must be -1 or 1 (got %d)", delta)
+	}
+	moved := false
+	_, err := c.store.Mutate(ctx, func(state *workstream.State) (bool, error) {
+		if _, ok := state.Session(sessionID); !ok {
+			return false, fmt.Errorf("durable session %q not found", sessionID)
+		}
+		membershipIndex, targetIndex := -1, -1
+		position := -1
+		for index, membership := range state.Memberships {
+			if membership.SessionID == sessionID {
+				if membership.WorkstreamID != workstreamID {
+					return false, fmt.Errorf("session %q no longer belongs to workstream %q", sessionID, workstreamID)
+				}
+				membershipIndex, position = index, membership.Position
+			}
+		}
+		if membershipIndex == -1 {
+			return false, fmt.Errorf("session %q is Ungrouped and has no durable position", sessionID)
+		}
+		targetPosition := position + delta
+		if targetPosition < 0 {
+			return false, nil
+		}
+		for index, membership := range state.Memberships {
+			if membership.WorkstreamID == workstreamID && membership.Position == targetPosition {
+				targetIndex = index
+				break
+			}
+		}
+		if targetIndex == -1 {
+			return false, nil
+		}
+		state.Memberships[membershipIndex].Position, state.Memberships[targetIndex].Position =
+			state.Memberships[targetIndex].Position, state.Memberships[membershipIndex].Position
+		moved = true
+		return true, nil
+	})
+	return moved && err == nil, err
+}
+
 func (c *Controller) ArchiveWorkstream(ctx context.Context, id string) error {
 	_, err := c.Execute(ctx, humanCommand(WorkstreamScope(id), ArchiveWorkstreamAction{}))
 	return err
@@ -1136,16 +1203,11 @@ func (c *Controller) moveSession(ctx context.Context, sessionID, workstreamID st
 		if current == workstreamID {
 			return false, nil
 		}
-		memberships := state.Memberships[:0]
-		for _, membership := range state.Memberships {
-			if membership.SessionID != sessionID {
-				memberships = append(memberships, membership)
-			}
-		}
-		state.Memberships = memberships
+		removeSessionMembership(state, sessionID)
 		if workstreamID != "" {
 			state.Memberships = append(state.Memberships, workstream.Membership{
-				WorkstreamID: workstreamID, SessionID: sessionID, JoinedAt: now,
+				WorkstreamID: workstreamID, SessionID: sessionID,
+				Position: nextMembershipPosition(*state, workstreamID), JoinedAt: now,
 			})
 		}
 		return true, nil
@@ -1201,7 +1263,8 @@ func (c *Controller) adoptSession(ctx context.Context, sessionID, workstreamID s
 		state.Sessions = append(state.Sessions, record)
 		if workstreamID != "" {
 			state.Memberships = append(state.Memberships, workstream.Membership{
-				WorkstreamID: workstreamID, SessionID: runtime.ID, JoinedAt: now,
+				WorkstreamID: workstreamID, SessionID: runtime.ID,
+				Position: nextMembershipPosition(*state, workstreamID), JoinedAt: now,
 			})
 		}
 		return true, nil
@@ -1364,7 +1427,38 @@ func project(state workstream.State, runtimes []shepherd.Session, path string) S
 		}
 		return snapshot.Sessions[i].CreatedAt.After(snapshot.Sessions[j].CreatedAt)
 	})
+	applyMembershipOrder(&snapshot, state)
 	return snapshot
+}
+
+// applyMembershipOrder replaces only the relative slots occupied by members
+// of each named workstream. That makes their explicit positions authoritative
+// without regrouping the flat projection; Ungrouped sessions retain their
+// relative live/newest order.
+func applyMembershipOrder(snapshot *Snapshot, state workstream.State) {
+	positionBySession := make(map[string]int, len(state.Memberships))
+	for _, membership := range state.Memberships {
+		positionBySession[membership.SessionID] = membership.Position
+	}
+	for _, container := range state.Workstreams {
+		if container.ArchivedAt != nil {
+			continue
+		}
+		indexes := make([]int, 0)
+		members := make([]Session, 0)
+		for index, session := range snapshot.Sessions {
+			if session.WorkstreamID == container.ID {
+				indexes = append(indexes, index)
+				members = append(members, session)
+			}
+		}
+		sort.SliceStable(members, func(i, j int) bool {
+			return positionBySession[members[i].ID] < positionBySession[members[j].ID]
+		})
+		for index := range indexes {
+			snapshot.Sessions[indexes[index]] = members[index]
+		}
+	}
 }
 
 func projectOne(state workstream.State, record workstream.SessionRecord, runtime *shepherd.Session) Session {
@@ -1430,6 +1524,38 @@ func validateRoot(value string) (string, error) {
 
 func containsRoot(roots []string, query string) bool {
 	return rootIndex(roots, query) >= 0
+}
+
+func nextMembershipPosition(state workstream.State, workstreamID string) int {
+	position := 0
+	for _, membership := range state.Memberships {
+		if membership.WorkstreamID == workstreamID && membership.Position >= position {
+			position = membership.Position + 1
+		}
+	}
+	return position
+}
+
+// removeSessionMembership also closes the removed member's position gap. The
+// store validates positions as dense, so every path that removes one member
+// uses this helper before the mutation can commit.
+func removeSessionMembership(state *workstream.State, sessionID string) (workstream.Membership, bool) {
+	removed, ok := state.MembershipForSession(sessionID)
+	if !ok {
+		return workstream.Membership{}, false
+	}
+	memberships := state.Memberships[:0]
+	for _, membership := range state.Memberships {
+		if membership.SessionID == sessionID {
+			continue
+		}
+		if membership.WorkstreamID == removed.WorkstreamID && membership.Position > removed.Position {
+			membership.Position--
+		}
+		memberships = append(memberships, membership)
+	}
+	state.Memberships = memberships
+	return removed, true
 }
 
 func rootIndex(roots []string, query string) int {

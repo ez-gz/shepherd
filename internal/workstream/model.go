@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	StateVersion         = 3
+	StateVersion         = 4
 	MaxSessionTitleRunes = 120
 	// MaxConversationIDRunes bounds a runner-owned identifier. Both runners mint
 	// UUIDs today, so this is far above what either produces; it exists because
@@ -125,9 +125,12 @@ type SessionRecord struct {
 }
 
 type Membership struct {
-	WorkstreamID string    `json:"workstream_id"`
-	SessionID    string    `json:"session_id"`
-	JoinedAt     time.Time `json:"joined_at"`
+	WorkstreamID string `json:"workstream_id"`
+	SessionID    string `json:"session_id"`
+	// Position is a dense, zero-based display order within one workstream.
+	// Ungrouped sessions have no membership and therefore no durable position.
+	Position int       `json:"position"`
+	JoinedAt time.Time `json:"joined_at"`
 }
 
 type State struct {
@@ -172,12 +175,20 @@ func (s State) Session(id string) (SessionRecord, bool) {
 }
 
 func (s State) WorkstreamForSession(sessionID string) string {
+	membership, ok := s.MembershipForSession(sessionID)
+	if !ok {
+		return ""
+	}
+	return membership.WorkstreamID
+}
+
+func (s State) MembershipForSession(sessionID string) (Membership, bool) {
 	for _, membership := range s.Memberships {
 		if membership.SessionID == sessionID {
-			return membership.WorkstreamID
+			return membership, true
 		}
 	}
-	return ""
+	return Membership{}, false
 }
 
 func (s State) Validate() error {
@@ -286,6 +297,7 @@ func (s State) validateVersion(version int) error {
 	}
 
 	memberships := make(map[string]struct{}, len(s.Memberships))
+	positions := make(map[string]map[int]string, len(s.Workstreams))
 	for _, item := range s.Memberships {
 		workstream, ok := workstreams[item.WorkstreamID]
 		if !ok {
@@ -303,7 +315,31 @@ func (s State) validateVersion(version int) error {
 		if item.JoinedAt.IsZero() {
 			return fmt.Errorf("membership for session %s is missing joined_at", item.SessionID)
 		}
+		if version >= 4 {
+			if item.Position < 0 {
+				return fmt.Errorf("membership for session %s has negative position %d", item.SessionID, item.Position)
+			}
+			byPosition := positions[item.WorkstreamID]
+			if byPosition == nil {
+				byPosition = make(map[int]string)
+				positions[item.WorkstreamID] = byPosition
+			}
+			if other, exists := byPosition[item.Position]; exists {
+				return fmt.Errorf("sessions %s and %s share position %d in workstream %s",
+					other, item.SessionID, item.Position, item.WorkstreamID)
+			}
+			byPosition[item.Position] = item.SessionID
+		}
 		memberships[item.SessionID] = struct{}{}
+	}
+	if version >= 4 {
+		for workstreamID, byPosition := range positions {
+			for position := 0; position < len(byPosition); position++ {
+				if _, exists := byPosition[position]; !exists {
+					return fmt.Errorf("workstream %s membership positions are not dense at %d", workstreamID, position)
+				}
+			}
+		}
 	}
 	return nil
 }

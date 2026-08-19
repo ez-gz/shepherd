@@ -94,7 +94,7 @@ func TestHelpAdvertisesQuickstart(t *testing.T) {
 		"Ctrl-G            resize snapshot/context",
 		"Ctrl-R            rename a workstream or edit/clear a session title",
 		"Ctrl-T            mark a session; Ctrl-T on a workstream moves or adopts it",
-		"Shift-↑/↓         reorder a workstream, or move a session to the next one",
+		"Shift-↑/↓         reorder a workstream or a session within its workstream",
 		"Ctrl-C            quit the dashboard; Esc never quits",
 	} {
 		if !strings.Contains(output.String(), want) {

@@ -153,6 +153,8 @@ func (a *app) run(args []string) error {
 		return a.runTitle(args[1:])
 	case "move":
 		return a.runMove(args[1:])
+	case "reorder":
+		return a.runSessionReorder(args[1:])
 	case "adopt":
 		return a.runAdopt(args[1:])
 	case "delete":
@@ -649,6 +651,7 @@ Organize (the same actions the dashboard chords perform, plus roots and archive)
                                         set or clear a durable session title
   shepherd move ID --workstream WS|--ungrouped
                                         change workstream membership
+  shepherd reorder ID --up|--down            move it within its workstream
   shepherd adopt ID [-w WORKSTREAM]           claim an orphaned tmux pane
   shepherd delete ID --yes                    delete a durable record with no runtime
 
@@ -675,7 +678,7 @@ Dashboard:
   Ctrl-N            create a workstream, named through the composer
   Ctrl-R            rename a workstream or edit/clear a session title
   Ctrl-T            mark a session; Ctrl-T on a workstream moves or adopts it
-  Shift-↑/↓         reorder a workstream, or move a session to the next one
+  Shift-↑/↓         reorder a workstream or a session within its workstream
   Ctrl-b d          detach the native terminal back to shepherd
   Ctrl-\            alternate one-chord detach shortcut
   Ctrl-X twice      stop runtime; repeat once pane-free to delete record
