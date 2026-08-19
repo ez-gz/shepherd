@@ -114,7 +114,9 @@ text, and move mark, then parks on Ungrouped. Quitting is `Ctrl-C`.
 | Leave a reply and compose a new session | `Esc`; the draft goes with it |
 | Attach to a selected session | `Enter` with an empty composer, when not replying |
 | Detach back to Shepherd | `Ctrl-b`, release, then `d`; or `Ctrl-\` |
-| Copy text out of an attached session | Drag to use tmux's selection, which reaches the system clipboard but stops at the pane; hold `Shift` (`Option` in iTerm2) for the terminal's own selection |
+| Select with the dashboard mouse | Click a row; click a workstream's disclosure triangle to collapse or expand it; wheel over the list to move the selection |
+| Copy text out of an attached session | Drag to use Shepherd's runner-neutral tmux selection, which copies to the system clipboard but stops at the pane; hold `Shift` (`Option` in iTerm2) for the terminal's own selection |
+| Copy without a mouse | `Ctrl-b [` enters tmux copy mode; move, press `Space`, extend the selection, and press `Enter`; `Esc` exits |
 | Leave the dashboard without stopping agents | `Ctrl-C`, or `Esc` with an empty composer |
 | Stop a runtime but keep its record | Select it and press `Ctrl-X` twice |
 

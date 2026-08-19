@@ -1,6 +1,6 @@
 # Attached terminal interaction
 
-Status: active UX backlog for 0.8.0 consideration.
+Status: shipped in 0.7.9.
 
 ## The problem
 
@@ -32,18 +32,36 @@ Attached sessions should have one short, discoverable contract:
 - A documented modifier bypasses tmux for terminal-native, cross-pane selection.
 - Keyboard-only copy mode remains available and visible in help.
 
-The dashboard remains terminal-native and does not request the mouse.
+The dashboard requests cell-motion mouse events. A click selects a row without
+attaching or acting on it, clicking a disclosure triangle collapses or expands
+a workstream, and the wheel moves the dashboard list, settings, or help. Mouse
+input disarms destructive confirmations. The terminal's bypass modifier remains
+the native-selection path on the dashboard as well as in attached sessions.
 
-## First experiment
+## What shipped
 
-Test a private-server tmux binding that always routes `MouseDrag1Pane` into copy
-mode and copies on drag end, even when the foreground application has requested
-mouse events. Preserve ordinary clicks and wheel events. On macOS, verify both
-tmux-buffer copying and the system clipboard rather than assuming OSC 52 support.
+The private tmux server always routes `MouseDrag1Pane` into copy mode and copies
+on drag end, even when the foreground application requested mouse events.
+Ordinary clicks and wheel events keep their default routing. On macOS,
+`copy-command` uses `/usr/bin/pbcopy`; tmux's paste buffer and `set-clipboard`
+remain enabled for portable behavior.
 
-Exercise the matrix in Terminal.app and iTerm2 against live Codex and Claude
-sessions, including alternate-screen output, borders, wrapped lines, scrolling,
-detach/reattach, and sessions launched before the bootstrap change.
+Keyboard copy is also independent of tmux's mode-key choice: `Ctrl-b [` enters
+copy mode, `Space` begins the selection, `Enter` copies and exits, and `Esc`
+leaves copy mode. Shepherd installs the selection and copy keys in both the
+emacs and vi tables.
+
+The dashboard handles cell-motion events without giving a click any keyboard
+verb's consequences. Hit testing uses the same scrolled list window as rendering,
+and a pinned composer refuses mouse redirection. Focused UI tests cover dashboard,
+settings, help, scrolled rows, disclosure clicks, and reply ownership. Real tmux
+integration tests pin the unconditional drag binding, both copy-mode tables, the
+clipboard options, and bootstrap-version migration.
+
+Manual release verification still exercises Terminal.app and iTerm2 against live
+Codex and Claude sessions, including alternate-screen output, borders, wrapped
+lines, scrolling, detach/reattach, and a server created before the bootstrap
+version changed.
 
 ## Deliberately not
 

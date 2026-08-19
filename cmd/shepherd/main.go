@@ -487,6 +487,7 @@ func (a *app) runAttach(args []string) error {
 		return err
 	}
 	fmt.Fprintln(a.err, "detach back with Ctrl-\\ or Ctrl-b d")
+	fmt.Fprintln(a.err, "drag copies through tmux · Shift-drag selects natively · iTerm2 uses Option")
 	command, err := controller.AttachCommand(ctx, session.ID)
 	if err != nil {
 		return err

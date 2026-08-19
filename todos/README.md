@@ -15,7 +15,7 @@ not become an undifferentiated backlog.
 | [What a runner exposes about what it is doing](runner-activity.md) | Transcript `activity` source shipped; Claude's per-process status file documented and unbuilt |
 | [Session status, titles, and recency](session-status-titles.md) | Durable and optional automatic titles plus native status shipped; returned/seen attention deferred |
 | [Session ordering within a workstream](session-ordering.md) | Shipped with durable schema-v4 ordering, dashboard chords, and the `reorder` CLI |
-| [Attached terminal interaction](terminal-interaction.md) | Active UX backlog: make selection, copying, clicking, and scrolling predictable across runners |
+| [Attached terminal interaction](terminal-interaction.md) | Shipped: dashboard mouse navigation and runner-neutral attached drag-to-copy |
 
 An idea should move into `docs/DESIGN.md` only when it becomes part of the
 committed architecture or an active implementation.

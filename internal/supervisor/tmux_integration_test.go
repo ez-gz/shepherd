@@ -31,6 +31,62 @@ func requireTmux(t *testing.T) string {
 	return ""
 }
 
+func TestBootstrapInstallsCopyFirstMouseContract(t *testing.T) {
+	tmuxBinary := requireTmux(t)
+	token, err := randomToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := &Tmux{
+		binary: tmuxBinary, socket: fmt.Sprintf("shepherd-mouse-test-%d-%s", os.Getpid(), token),
+		executable: "/path/that/must/not/run",
+	}
+	t.Cleanup(func() { cleanupTestTmux(manager) })
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := manager.Bootstrap(ctx); err != nil {
+		t.Fatal(err)
+	}
+	assertTmuxValue := func(args []string, want string) {
+		t.Helper()
+		output, runErr := manager.run(ctx, nil, args...)
+		if runErr != nil || strings.TrimSpace(string(output)) != want {
+			t.Fatalf("tmux %v = %q, err=%v, want %q", args, output, runErr, want)
+		}
+	}
+	assertTmuxValue([]string{"show-options", "-gv", "mouse"}, "on")
+	assertTmuxValue([]string{"show-options", "-gv", "set-clipboard"}, "on")
+	assertTmuxValue([]string{"show-options", "-sv", "@shepherd_bootstrap_version"}, bootstrapVersion)
+
+	rootBinding, err := manager.run(ctx, nil, "list-keys", "-T", "root", "MouseDrag1Pane")
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding := strings.TrimSpace(string(rootBinding))
+	if !strings.Contains(binding, "copy-mode -M") || strings.Contains(binding, "mouse_any_flag") || strings.Contains(binding, "send-keys -M") {
+		t.Fatalf("MouseDrag1Pane retained provider-dependent routing: %q", binding)
+	}
+	for _, table := range []string{"copy-mode", "copy-mode-vi"} {
+		output, runErr := manager.run(ctx, nil, "list-keys", "-T", table, "MouseDragEnd1Pane")
+		if runErr != nil || !strings.Contains(string(output), "copy-pipe-and-cancel") {
+			t.Fatalf("%s drag end = %q, err=%v", table, output, runErr)
+		}
+		for key, command := range map[string]string{
+			"Space": "begin-selection",
+			"Enter": "copy-pipe-and-cancel",
+		} {
+			output, runErr = manager.run(ctx, nil, "list-keys", "-T", table, key)
+			if runErr != nil || !strings.Contains(string(output), command) {
+				t.Fatalf("%s %s = %q, err=%v, want %s", table, key, output, runErr, command)
+			}
+		}
+	}
+	if command := systemClipboardCommand(); command != "" {
+		assertTmuxValue([]string{"show-options", "-sv", "copy-command"}, command)
+	}
+}
+
 func TestTmuxLifecycleAndLiteralMessageDelivery(t *testing.T) {
 	tmuxBinary := requireTmux(t)
 	versionOutput, err := exec.Command(tmuxBinary, "-V").Output()

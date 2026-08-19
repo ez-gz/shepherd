@@ -116,11 +116,15 @@ key never depends on remembering which one you meant:
 | `Shift-Up` / `Shift-Down` | Reorder a named workstream, or reorder a session within its named workstream; Ungrouped keeps live/newest order |
 | `Up` / `Down` | Select a workstream or session, or move between multiline composer rows |
 | `Option-Up` / `Option-Down` | Jump the selection to the previous or next workstream, passing over the sessions between |
+| Click a dashboard row | Select it without attaching or performing an organizing action; click its disclosure triangle to collapse or expand a workstream |
+| Wheel over the dashboard list, settings, or help | Move that viewport; mouse input never commits composer text or confirms a destructive action |
 | `Ctrl-G` | Enter resize mode; `Up` grows the lower pane, `Down` shows more sessions, `r` resets, and `Esc` exits |
 | `Enter` on a workstream | Collapse or expand its sessions |
 | `Enter` on a session | Attach its native terminal; inactive while replying, so it cannot attach to a row other than the pinned target |
 | `Ctrl-\` or `Ctrl-b d` while attached | Detach back to Shepherd |
-| `Shift-drag` while attached | Select with the terminal rather than tmux, crossing panes and taking whole lines; iTerm2 uses `Option` for this |
+| Drag while attached | Select and copy through tmux, independent of which runner owns the pane |
+| `Shift-drag` while attached | Bypass tmux and select with the terminal, crossing panes and taking whole lines; iTerm2 uses `Option` for this |
+| `Ctrl-b [` while attached | Enter keyboard copy mode; move to the start, press `Space`, extend the selection, and press `Enter` to copy; `Esc` exits |
 | `Ctrl-X` twice | Stop/remove a present runtime; once no pane remains, press twice again to delete its durable record |
 | `Esc` | Leave a reply and discard its draft, then clear the composer, then release a move mark, then select Ungrouped |
 | `Ctrl-C` | Quit the dashboard; `Esc` never quits |
@@ -140,15 +144,23 @@ it starts, so a session launched before 0.7.0 keeps the old behaviour until you
 restart it. A tmux too old to offer the encoding keeps the behaviour it had;
 nothing else about the session changes.
 
-The mouse is settled the same way, and it is worth knowing which program has it.
-The dashboard never asks for the mouse, so selecting there is your terminal's
-own. Attached, tmux takes it: a drag selects and copies to the system clipboard,
-and the wheel scrolls that pane's scrollback rather than your terminal's. Both
-are worth having, but tmux selects what is drawn on screen, so it stops at the
-pane edge and takes along whatever borders an agent's interface paints — which
-is why the same drag reads cleanly in one runner and raggedly in another. Hold
-`Shift` to hand the drag back to your terminal, which crosses panes, follows
-whole lines, and reaches its own scrollback. iTerm2 spells that `Option`.
+The mouse has one Shepherd contract instead of a runner-specific one. On the
+dashboard, click selects a row, its disclosure triangle collapses or expands a
+workstream, and the wheel moves the list, settings, or help viewport. A click
+never attaches, commits text, organizes, or confirms a destructive action.
+
+Attached, tmux owns every drag even when the runner requested mouse events, so
+the same gesture selects and copies in Codex, Claude, and a shell. Plain clicks
+and wheel events remain available to a runner that implements them; otherwise
+tmux handles them. The selection stops at the pane edge and includes whatever
+borders the runner drew. On macOS the drag-end copy goes directly through
+`pbcopy` as well as tmux's paste buffer and portable terminal-clipboard path, so
+a terminal that blocks OSC 52 is not a silent failure. Hold `Shift` to hand a
+dashboard or attached-session drag back to the terminal for native, cross-pane
+selection. iTerm2 spells that bypass modifier `Option`. For a mouse-free path,
+`Ctrl-b [` enters copy mode; move to the start, press `Space`, extend the
+selection, and press `Enter`. Those keys are the same under tmux's vi and emacs
+mode tables.
 
 Every full-screen surface carries an unmistakable mode badge: **Dashboard**,
 **Settings**, or **Help**. Organizing happens on the dashboard rather than in a

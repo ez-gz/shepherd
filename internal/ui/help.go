@@ -123,6 +123,8 @@ func (m Model) helpContentLines() []string {
 		{"↑ / ↓", "Select a workstream or session; in a multiline composer, move between its logical lines instead. The selection is held while a reply or a rename owns the composer, so the pane below keeps showing what is being answered."},
 		{"Option-↑ / Option-↓", "Jump to the previous or next workstream, passing over the sessions between. From inside a workstream the first press up lands on its own header. Both keep working while a multiline draft owns ↑ and ↓."},
 		{"PgUp / PgDn", "Move through the dashboard list one viewport at a time."},
+		{"Mouse click", "Select a workstream or session without attaching or acting on it. Click a workstream's disclosure triangle to collapse or expand it."},
+		{"Mouse wheel", "Move the dashboard list, settings, or help viewport. A pointer gesture disarms lifecycle and archive confirmations."},
 		{"← / → · empty", "Collapse or expand the selected workstream."},
 		{"← / → · text", "Move the composer cursor."},
 		{"Enter · empty", "Collapse a workstream, or attach to an available session runtime. Inactive while replying, so it cannot attach to a row other than the pinned target."},
@@ -180,7 +182,9 @@ func (m Model) helpContentLines() []string {
 	lines = appendHelpParagraph(lines, m.width,
 		"Attachment enters the native Codex, Claude, or shell terminal. Use Ctrl-\\ or Ctrl-b d to detach back to the same Shepherd dashboard. Detaching and quitting Shepherd leave the agent running.")
 	lines = appendHelpParagraph(lines, m.width,
-		"While attached, tmux owns the mouse: dragging selects and copies to the system clipboard, and the wheel scrolls that pane's scrollback. That selection follows the drawn screen, so it stops at the pane and picks up whatever borders an agent's interface draws. Hold Shift while dragging for your terminal's own selection instead, which crosses panes and takes whole lines. iTerm2 uses Option for that rather than Shift.")
+		"While attached, tmux owns every drag even when the runner asked for mouse events, so dragging selects and copies consistently in Codex, Claude, and a shell. Plain clicks and wheel events remain available to runners that use them. The selection follows the drawn screen, stops at the pane edge, and includes any borders the runner paints. Hold Shift while dragging on the dashboard or in an attached session for terminal-native, cross-pane selection. iTerm2 uses Option instead.")
+	lines = appendHelpParagraph(lines, m.width,
+		"For keyboard copy, press Ctrl-b [, move to the start, press Space, extend the selection, and press Enter. Esc exits copy mode. Shepherd installs those same keys for tmux's vi and emacs mode tables.")
 
 	lines = appendHelpSection(lines, m.width, "CLI commands")
 	for _, binding := range []struct {

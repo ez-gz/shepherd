@@ -663,6 +663,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.notice = ""
 		return m, nil
 
+	case tea.MouseMsg:
+		return m.handleMouse(message)
+
 	case tea.KeyPressMsg:
 		return m.handleKey(message)
 	}
@@ -1536,17 +1539,20 @@ func (m Model) View() tea.View {
 	if m.width <= 0 || m.height <= 0 {
 		view := tea.NewView("")
 		view.AltScreen = true
+		view.MouseMode = tea.MouseModeCellMotion
 		return view
 	}
 	if m.overlay == overlayHelp {
 		view := tea.NewView(textStyle.MaxWidth(m.width).Render(m.renderHelp()))
 		view.AltScreen = true
+		view.MouseMode = tea.MouseModeCellMotion
 		view.WindowTitle = "shepherd · help"
 		return view
 	}
 	if m.screen == screenSettings {
 		view := tea.NewView(textStyle.MaxWidth(m.width).Render(m.renderSettings()))
 		view.AltScreen = true
+		view.MouseMode = tea.MouseModeCellMotion
 		view.WindowTitle = "shepherd · settings"
 		return view
 	}
@@ -1554,6 +1560,7 @@ func (m Model) View() tea.View {
 	content := textStyle.MaxWidth(m.width).Render(strings.Join(sections, "\n"))
 	view := tea.NewView(clipPane(content, m.width, m.height))
 	view.AltScreen = true
+	view.MouseMode = tea.MouseModeCellMotion
 	view.WindowTitle = "shepherd · parallel agents"
 	return view
 }
@@ -1612,13 +1619,7 @@ func (m Model) renderWorkstreams() string {
 		line := mutedStyle.Render("  No workstreams yet. Press Ctrl-N to create one.")
 		return line + strings.Repeat("\n", max(0, height-1))
 	}
-	start := 0
-	if m.cursor >= height {
-		start = m.cursor - height + 1
-	}
-	if start+height > len(rows) {
-		start = max(0, len(rows)-height)
-	}
+	start := m.listViewportStart(rows)
 	end := min(len(rows), start+height)
 	lines := make([]string, 0, height)
 	for index := start; index < end; index++ {

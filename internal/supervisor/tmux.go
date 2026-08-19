@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -32,7 +33,7 @@ const (
 	// bootstrapVersion is the marker that lets a long-lived server skip
 	// reconfiguration. Bump it whenever the option set changes, or servers
 	// already running keep the configuration they were started with.
-	bootstrapVersion = "2"
+	bootstrapVersion = "3"
 	framingAttempts  = 3
 )
 
@@ -103,15 +104,51 @@ func (t *Tmux) Bootstrap(ctx context.Context) error {
 		// terminal for. The inner half, what tmux then offers a pane, is set
 		// after this batch.
 		{"set-option", "-as", "terminal-features", ",xterm*:extkeys"},
+		// A drag means selection in every attached runner. tmux's default
+		// MouseDrag1Pane binding forwards the drag when the foreground program
+		// requested mouse events, which makes the same gesture runner-dependent.
+		// Starting copy mode unconditionally on the first drag event keeps plain
+		// clicks and wheel events available to the runner while giving selection
+		// one owner. The copy-mode bindings are named explicitly rather than left
+		// to tmux defaults so upgrades cannot silently change the contract.
+		{"bind-key", "-T", "root", "MouseDrag1Pane", "copy-mode", "-M"},
+		{"bind-key", "-T", "copy-mode", "MouseDragEnd1Pane", "send-keys", "-X", "copy-pipe-and-cancel"},
+		{"bind-key", "-T", "copy-mode-vi", "MouseDragEnd1Pane", "send-keys", "-X", "copy-pipe-and-cancel"},
+		// Keyboard selection is the same in both tmux mode-key tables. Without
+		// these bindings emacs mode uses Space for page-down and Meta-W to copy,
+		// while vi mode uses Space and Enter, making the fallback depend on an
+		// otherwise invisible server option.
+		{"bind-key", "-T", "copy-mode", "Space", "send-keys", "-X", "begin-selection"},
+		{"bind-key", "-T", "copy-mode", "Enter", "send-keys", "-X", "copy-pipe-and-cancel"},
+		{"bind-key", "-T", "copy-mode-vi", "Space", "send-keys", "-X", "begin-selection"},
+		{"bind-key", "-T", "copy-mode-vi", "Enter", "send-keys", "-X", "copy-pipe-and-cancel"},
 		{"bind-key", "-n", "C-\\", "detach-client"},
-		{"set-option", "-s", "@shepherd_bootstrap_version", bootstrapVersion},
 	}
+	// set-clipboard still supplies the portable OSC 52 path and keeps the tmux
+	// paste buffer populated. On macOS, copy-command also gives copy-mode a
+	// direct system-clipboard path, so a terminal that blocks OSC 52 does not
+	// make a successful selection look broken.
+	if command := systemClipboardCommand(); command != "" {
+		commands = append(commands, []string{"set-option", "-s", "copy-command", command})
+	}
+	commands = append(commands, []string{"set-option", "-s", "@shepherd_bootstrap_version", bootstrapVersion})
 	args := joinTmuxCommands(commands)
 	if _, err := t.run(ctx, nil, args...); err != nil {
 		return fmt.Errorf("configure tmux server: %w", err)
 	}
 	t.configureKeyReporting(ctx)
 	return nil
+}
+
+func systemClipboardCommand() string {
+	if runtime.GOOS != "darwin" {
+		return ""
+	}
+	const pbcopy = "/usr/bin/pbcopy"
+	if info, err := os.Stat(pbcopy); err == nil && !info.IsDir() {
+		return pbcopy
+	}
+	return ""
 }
 
 // configureKeyReporting decides how tmux encodes a modified key for the pane,
