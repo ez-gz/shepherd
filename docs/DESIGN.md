@@ -427,6 +427,7 @@ The runtime layer derives only states tmux can prove:
 | `attached` | live session has one or more tmux clients |
 | `exited` | pane is dead; status may be known zero or unavailable |
 | `failed` | pane is dead with nonzero status |
+| `degraded` | a canonical Shepherd pane exists, but required metadata is malformed |
 
 `pane_dead_time` freezes runtime for exited sessions. `window_activity` provides
 a coarse terminal-activity timestamp on tmux versions where no reliable
@@ -439,9 +440,15 @@ The controller conservatively joins those observations to durable records:
 | durable ID plus matching live pane | `live` |
 | durable ID plus matching dead retained pane and known status | record `exited` and exit code |
 | durable ID plus matching dead retained pane without status | project exited with unknown outcome; do not record success |
+| durable ID plus degraded pane metadata | project `degraded`; do not rewrite binding or outcome |
 | explicit stop whose tmux kill succeeds | record `stopped` |
 | durable ID, no pane, no terminal outcome | `unavailable` |
 | pane carrying an unknown durable ID | `orphaned` and excluded from membership |
+
+Degraded panes remain visible and available for capture, attach, and stop. Input
+injection and adoption fail closed until their metadata is readable. The same
+observation health feeds `shepherd doctor --deep`; no runtime-health detail is
+written into `state.json` or a diagnostic log.
 
 Tmux 3.3/3.4 can retain a dead pane while omitting `pane_dead_status`. That is
 positive evidence that the process ended, but not evidence of success: the
@@ -496,8 +503,10 @@ Messages never enter a shell command constructed by Shepherd. It:
 3. deletes the buffer; and
 4. sends the `Enter` key separately.
 
-Delivery is refused for a dead pane, a pane in copy/scroll mode, or a pane whose
-input is disabled. The selected terminal preview remains visible because an
+Prompts and follow-ups are rejected above 64 KiB before durable storage, argv
+construction, or tmux input. Delivery is refused for a dead pane, a degraded
+pane, a pane in copy/scroll mode, or a pane whose input is disabled. The
+selected terminal preview remains visible because an
 alive process might currently be showing an approval dialog rather than its
 normal composer. In a `no-agent` pane the destination is intentionally an
 interactive shell, so that shell interprets follow-up text after delivery.
@@ -780,8 +789,9 @@ nothing rather than reaching further back for something that is no longer true.
 
 Commands are told which session through `SHEPHERD_SESSION_*` variables and are
 never given the prompt or messages. Wanting a status line in a row is not a
-reason to hand what someone typed to another program on a timer, and the same
-rule keeps prompts out of the planned diagnostic log.
+reason to hand what someone typed to another program on a timer. The on-demand
+deep doctor does not read them, and Shepherd deliberately keeps no diagnostic
+log.
 
 Shepherd is the contract layer here, not the implementation. It defines what a
 source is asked, what it may return, how often it runs, and how its answer is

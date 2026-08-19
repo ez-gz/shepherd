@@ -168,3 +168,19 @@ func TestCommandScopeValidationPrecedesAuthorization(t *testing.T) {
 		t.Fatalf("mismatched destination error = %v", err)
 	}
 }
+
+func TestCommandRejectsOversizedInteractivePayloads(t *testing.T) {
+	tooLarge := strings.Repeat("x", shepherd.MaxInteractivePayloadBytes+1)
+	tests := []Action{
+		StartAction{Prompt: tooLarge},
+		ResumeSessionAction{Prompt: tooLarge},
+		ForkSessionAction{Prompt: tooLarge},
+		SendAction{Message: tooLarge},
+	}
+	for _, action := range tests {
+		command := humanCommand(InstallationScope(), action)
+		if err := validateCommand(command); err == nil || !strings.Contains(err.Error(), "maximum") {
+			t.Errorf("validateCommand(%T) error = %v", action, err)
+		}
+	}
+}

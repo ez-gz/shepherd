@@ -43,6 +43,11 @@ go install github.com/ez-gz/shepherd/cmd/shepherd@latest
 shepherd doctor
 ```
 
+Run `shepherd doctor --deep` when setup or terminal interaction looks wrong. It
+validates durable state, locks, private permissions, the tmux socket, pane
+metadata, mouse selection, and clipboard integration without writing diagnostic
+logs or reading prompts from terminal output.
+
 `@latest` resolves to the newest release tag, so this command never goes stale.
 Substitute an explicit tag when you need a particular release.
 

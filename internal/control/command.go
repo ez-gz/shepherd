@@ -299,9 +299,15 @@ func validateActionScope(command Command) error {
 	switch action := command.Action.(type) {
 	// A resume is a start: either scope is meaningful, because the scope names
 	// where the new session lands.
-	case StartAction, ResumeSessionAction, ForkSessionAction:
-		return nil
-	case SendAction, StopAction, DeleteSessionAction, SetSessionTitleAction,
+	case StartAction:
+		return shepherd.ValidateInteractivePayload("prompt", action.Prompt)
+	case ResumeSessionAction:
+		return shepherd.ValidateInteractivePayload("prompt", action.Prompt)
+	case ForkSessionAction:
+		return shepherd.ValidateInteractivePayload("prompt", action.Prompt)
+	case SendAction:
+		return shepherd.ValidateInteractivePayload("message", action.Message)
+	case StopAction, DeleteSessionAction, SetSessionTitleAction,
 		RegisterConversationAction:
 		return nil
 	case CreateWorkstreamAction:

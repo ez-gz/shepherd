@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -22,6 +23,7 @@ type memoryRepository struct {
 	state       workstream.State
 	path        string
 	artifacts   string
+	mutateErr   error
 }
 
 func newMemoryRepository(root string) *memoryRepository {
@@ -37,6 +39,9 @@ func (r *memoryRepository) Load(context.Context) (workstream.State, error) {
 func (r *memoryRepository) Mutate(_ context.Context, mutate func(*workstream.State) (bool, error)) (workstream.State, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.mutateErr != nil {
+		return workstream.State{}, r.mutateErr
+	}
 	state := cloneState(r.state)
 	changed, err := mutate(&state)
 	if err != nil {
@@ -438,6 +443,63 @@ func TestReconciliationIsConservativeAndFindsOrphans(t *testing.T) {
 	state, _ = repository.Load(context.Background())
 	if state.Revision != revision {
 		t.Fatalf("idempotent reconciliation advanced revision from %d to %d", revision, state.Revision)
+	}
+}
+
+func TestDegradedRuntimeIsVisibleWithoutRewritingDurableState(t *testing.T) {
+	root := t.TempDir()
+	repository := newMemoryRepository(root)
+	id := "018f0000-0000-4000-8000-000000000027"
+	created := time.Unix(1_700_000_100, 0).UTC()
+	_, err := repository.Mutate(context.Background(), func(state *workstream.State) (bool, error) {
+		state.Sessions = append(state.Sessions, workstream.SessionRecord{
+			ID: id, Backend: shepherd.BackendCodex, InitialPrompt: "task", InitialRoot: root,
+			CreatedAt: created, Launch: workstream.LaunchIntent{Status: workstream.LaunchPending},
+		})
+		return true, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision := repository.state.Revision
+	supervisor := &fakeSupervisor{sessions: []shepherd.Session{{
+		ID: id, Name: "shepherd-" + id, PaneID: "%1", Status: shepherd.StatusLive,
+		ObservationError: "invalid backend metadata",
+	}}}
+	controller := New(supervisor, repository, "shepherd-test")
+	snapshot, err := controller.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Sessions) != 1 || snapshot.Sessions[0].Status != StatusDegraded || !snapshot.Sessions[0].Available() {
+		t.Fatalf("degraded projection = %#v", snapshot.Sessions)
+	}
+	state, _ := repository.Load(context.Background())
+	if state.Revision != revision || state.Sessions[0].Launch.Status != workstream.LaunchPending || state.Sessions[0].Launch.Binding != nil {
+		t.Fatalf("degraded observation rewrote durable state: %#v", state.Sessions[0])
+	}
+	if err := controller.Send(context.Background(), id, "hello"); err == nil || !strings.Contains(err.Error(), "degraded") {
+		t.Fatalf("degraded send error = %v", err)
+	}
+	if _, err := controller.AdoptSession(context.Background(), id, ""); err == nil || !strings.Contains(err.Error(), "degraded") {
+		t.Fatalf("degraded adopt error = %v", err)
+	}
+}
+
+func TestCreateWorkstreamRemovesNewEmptyArtifactDirectoryOnMutationFailure(t *testing.T) {
+	root := t.TempDir()
+	repository := newMemoryRepository(root)
+	repository.mutateErr = errors.New("state write failed")
+	controller := New(&fakeSupervisor{}, repository, "shepherd-test")
+	if _, err := controller.CreateWorkstream(context.Background(), "Core", "", []string{root}); err == nil {
+		t.Fatal("CreateWorkstream succeeded despite repository failure")
+	}
+	entries, err := os.ReadDir(repository.ArtifactBase())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("failed workstream left artifacts: %#v", entries)
 	}
 }
 

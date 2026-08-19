@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -29,7 +30,7 @@ import (
 	learnshepherd "github.com/ez-gz/shepherd/skills/learn-shepherd"
 )
 
-var version = "0.7.9"
+var version = "0.8.0"
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "__statusline" {
@@ -528,11 +529,12 @@ func (a *app) runDoctor(args []string) error {
 	}
 	flags := a.newFlagSet("shepherd doctor")
 	socket := flags.String("socket", defaultSocket(), "private tmux socket name")
+	deep := flags.Bool("deep", false, "validate state, locks, permissions, socket, and clipboard integration")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if flags.NArg() != 0 {
-		return errors.New("usage: shepherd doctor")
+		return errors.New("usage: shepherd doctor [--deep]")
 	}
 	stateStore, err := workstream.DefaultStore()
 	if err != nil {
@@ -580,9 +582,6 @@ func (a *app) runDoctor(args []string) error {
 			fmt.Fprintf(a.out, "[missing] %-7s %s (%s)\n", check.name, format.OneLine(requested), label)
 			continue
 		}
-		if check.runner {
-			runnersFound++
-		}
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		versionArguments := append(append([]string(nil), command[1:]...), check.version...)
 		output, err := exec.CommandContext(ctx, path, versionArguments...).CombinedOutput()
@@ -590,6 +589,9 @@ func (a *app) runDoctor(args []string) error {
 		if err != nil {
 			fmt.Fprintf(a.out, "[warn]    %-7s %s\n", check.name, format.OneLine(path))
 			continue
+		}
+		if check.runner {
+			runnersFound++
 		}
 		versionText := format.OneLine(string(output))
 		if check.name == "tmux" {
@@ -603,7 +605,7 @@ func (a *app) runDoctor(args []string) error {
 	}
 	if runnersFound == 0 {
 		failed = true
-		fmt.Fprintln(a.out, "[missing] runner  install at least one of codex or claude")
+		fmt.Fprintln(a.out, "[missing] runner  no runnable codex or claude installation found")
 	}
 	fmt.Fprintf(a.out, "[config]  socket  tmux -L %s\n", format.OneLine(*socket))
 	fmt.Fprintf(a.out, "[config]  file    %s\n", format.OneLine(configStore.Path))
@@ -611,11 +613,165 @@ func (a *app) runDoctor(args []string) error {
 	fmt.Fprintf(a.out, "[state]   files   %s\n", format.OneLine(stateStore.Artifacts))
 	fmt.Fprintf(a.out, "[config]  runner  %s\n", settings.DefaultRunner)
 	fmt.Fprintf(a.out, "[config]  root    %s\n", format.OneLine(a.workdir()))
+	if *deep {
+		if deepDoctorFailed(a.out, configStore.Path, stateStore, *socket) {
+			failed = true
+		}
+	}
 	if failed {
-		return errors.New("required dependencies are missing")
+		return errors.New("doctor found problems")
 	}
 	fmt.Fprintln(a.out, "[next]   tour    shepherd quickstart")
 	return nil
+}
+
+func deepDoctorFailed(writer io.Writer, configPath string, stateStore workstream.FileStore, socket string) bool {
+	failed := false
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	state, err := stateStore.Load(ctx)
+	cancel()
+	if err != nil {
+		failed = true
+		fmt.Fprintf(writer, "[fail]    state   %s\n", format.OneLine(err.Error()))
+	} else {
+		fmt.Fprintf(writer, "[ok]      state   schema %d · revision %d · %d workstreams · %d sessions\n",
+			state.Version, state.Revision, len(state.Workstreams), len(state.Sessions))
+	}
+
+	lockCtx, lockCancel := context.WithTimeout(context.Background(), 750*time.Millisecond)
+	lockErr := stateStore.WithLifecycleLock(lockCtx, func() error { return nil })
+	lockCancel()
+	if lockErr != nil {
+		failed = true
+		fmt.Fprintf(writer, "[fail]    lock    %s\n", format.OneLine(lockErr.Error()))
+	} else {
+		fmt.Fprintln(writer, "[ok]      lock    state and lifecycle locks are available")
+	}
+
+	permissionPaths := []doctorPermission{
+		{label: "home", path: filepath.Dir(stateStore.Path), directory: true, required: true},
+		{label: "config", path: configPath},
+		{label: "state", path: stateStore.Path, required: err == nil && state.Revision > 0},
+		{label: "state lock", path: stateStore.Path + ".lock", required: true},
+		{label: "lifecycle lock", path: stateStore.Path + ".lifecycle.lock", required: true},
+		{label: "artifacts", path: stateStore.Artifacts, directory: true, required: err == nil && len(state.Workstreams) > 0},
+	}
+	if err == nil {
+		for _, item := range state.Workstreams {
+			permissionPaths = append(permissionPaths, doctorPermission{
+				label: "workstream " + format.ShortID(item.ID), path: item.ArtifactDir, directory: true, required: true,
+			})
+		}
+	}
+	seen := make(map[string]bool)
+	for _, check := range permissionPaths {
+		if seen[check.path] {
+			continue
+		}
+		seen[check.path] = true
+		if !doctorPrivatePath(writer, check) {
+			failed = true
+		}
+	}
+
+	manager, managerErr := supervisor.New(socket)
+	if managerErr != nil {
+		failed = true
+		fmt.Fprintf(writer, "[fail]    socket  %s\n", format.OneLine(managerErr.Error()))
+		return failed
+	}
+	socketCtx, socketCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	health, inspectErr := manager.Inspect(socketCtx)
+	socketCancel()
+	if inspectErr != nil {
+		failed = true
+		fmt.Fprintf(writer, "[fail]    socket  %s\n", format.OneLine(inspectErr.Error()))
+		return failed
+	}
+	if !health.ServerRunning {
+		fmt.Fprintln(writer, "[ok]      socket  inactive; it will start on the first session launch")
+		return failed
+	}
+	fmt.Fprintf(writer, "[ok]      socket  active · %d sessions\n", health.SessionCount)
+	if health.Bootstrap != supervisor.ExpectedBootstrapVersion() {
+		failed = true
+		fmt.Fprintf(writer, "[fail]    tmux    bootstrap %q, want %q; reopen Shepherd to refresh it\n",
+			health.Bootstrap, supervisor.ExpectedBootstrapVersion())
+	} else {
+		fmt.Fprintf(writer, "[ok]      tmux    bootstrap %s\n", health.Bootstrap)
+	}
+	if health.Mouse != "on" || !strings.Contains(health.DragBinding, "copy-mode") || !strings.Contains(health.DragBinding, "-M") {
+		failed = true
+		fmt.Fprintln(writer, "[fail]    mouse   copy-first drag binding is not active")
+	} else {
+		fmt.Fprintln(writer, "[ok]      mouse   copy-first selection is active")
+	}
+	clipboardOK := health.SetClipboard == "on" && strings.Contains(health.CopyBinding, "copy-pipe-and-cancel")
+	if runtime.GOOS == "darwin" {
+		clipboardOK = clipboardOK && health.CopyCommand == "/usr/bin/pbcopy"
+	}
+	if !clipboardOK {
+		failed = true
+		fmt.Fprintln(writer, "[fail]    copy    tmux clipboard integration is incomplete")
+	} else {
+		fmt.Fprintln(writer, "[ok]      copy    tmux clipboard integration is active")
+	}
+	if len(health.DegradedPanes) > 0 {
+		failed = true
+		fmt.Fprintf(writer, "[fail]    panes   %d session panes have degraded Shepherd metadata\n", len(health.DegradedPanes))
+		for _, pane := range health.DegradedPanes {
+			fmt.Fprintf(writer, "[fail]    pane    %s · %s\n", format.ShortID(pane.ID), format.OneLine(pane.Reason))
+		}
+	} else {
+		fmt.Fprintln(writer, "[ok]      panes   all Shepherd pane metadata is readable")
+	}
+	return failed
+}
+
+type doctorPermission struct {
+	label     string
+	path      string
+	directory bool
+	required  bool
+}
+
+func doctorPrivatePath(writer io.Writer, check doctorPermission) bool {
+	info, err := os.Lstat(check.path)
+	if errors.Is(err, os.ErrNotExist) {
+		if check.required {
+			fmt.Fprintf(writer, "[fail]    perms   %-14s missing: %s\n", check.label, format.OneLine(check.path))
+			return false
+		}
+		fmt.Fprintf(writer, "[skip]    perms   %-14s not created yet\n", check.label)
+		return true
+	}
+	if err != nil {
+		fmt.Fprintf(writer, "[fail]    perms   %-14s %s\n", check.label, format.OneLine(err.Error()))
+		return false
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		fmt.Fprintf(writer, "[fail]    perms   %-14s symlink is not accepted: %s\n", check.label, format.OneLine(check.path))
+		return false
+	}
+	if check.directory != info.IsDir() {
+		kind := "file"
+		if check.directory {
+			kind = "directory"
+		}
+		fmt.Fprintf(writer, "[fail]    perms   %-14s expected %s: %s\n", check.label, kind, format.OneLine(check.path))
+		return false
+	}
+	required := os.FileMode(0o600)
+	if check.directory {
+		required = 0o700
+	}
+	mode := info.Mode().Perm()
+	if mode&0o077 != 0 || mode&required != required {
+		fmt.Fprintf(writer, "[fail]    perms   %-14s %04o (want private owner access)\n", check.label, mode)
+		return false
+	}
+	fmt.Fprintf(writer, "[ok]      perms   %-14s %04o\n", check.label, mode)
+	return true
 }
 
 func printHelp(writer io.Writer) {
@@ -637,7 +793,7 @@ Usage:
   shepherd resume [--json] ID MESSAGE         send to its live Codex owner, or resume when unowned
   shepherd fork [--json] ID MESSAGE           explicitly branch a Codex conversation
   shepherd stop ID                            stop runtime; keep the durable record
-  shepherd doctor                             check local dependencies
+  shepherd doctor [--deep]                    check dependencies; deeply validate local runtime health
 
 Organize (the same actions the dashboard chords perform, plus roots and archive):
   shepherd ws list [--json]                   list workstreams, roots, session counts
@@ -837,6 +993,7 @@ type cliSessionJSON struct {
 	RuntimeSeconds    int64            `json:"runtime_seconds"`
 	LastActivityAt    *time.Time       `json:"last_activity_at,omitempty"`
 	NativeStatus      string           `json:"native_status,omitempty"`
+	DegradedReason    string           `json:"degraded_reason,omitempty"`
 }
 
 func newCLISnapshot(snapshot control.Snapshot) cliSnapshotJSON {
@@ -869,8 +1026,10 @@ func newCLISnapshot(snapshot control.Snapshot) cliSnapshotJSON {
 			lastActivityAt = &value
 		}
 		nativeStatus := ""
+		degradedReason := ""
 		if session.Runtime != nil {
 			nativeStatus = session.Runtime.NativeStatus
+			degradedReason = session.Runtime.ObservationError
 		}
 		result.Sessions = append(result.Sessions, cliSessionJSON{
 			ID: session.ID, Runner: session.Backend, State: string(session.Status),
@@ -881,6 +1040,7 @@ func newCLISnapshot(snapshot control.Snapshot) cliSnapshotJSON {
 			ExitCode: exitCode, RuntimeSeconds: int64(session.RuntimeDuration(time.Now()).Seconds()),
 			LastActivityAt: lastActivityAt,
 			NativeStatus:   nativeStatus,
+			DegradedReason: degradedReason,
 		})
 	}
 	return result

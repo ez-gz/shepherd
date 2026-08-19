@@ -102,8 +102,8 @@ directory and prompt are — and a cold start on a loaded machine is slow.
 
 ## Next
 
-- `shepherd history` for Codex. The identification half is now done — see
-  [session-history.md](session-history.md) — and only the rollout parser is
-  left.
+- Codex history remains optional compatibility cleanup, not a release goal. A
+  dedicated rollout parser is not justified until a runner-neutral workflow
+  needs the same structured record — see [session-history.md](session-history.md).
 - A dashboard affordance for resume. The durable registration is the load-
   bearing part and shipped without it.

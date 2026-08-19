@@ -3,7 +3,10 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -91,6 +94,7 @@ func TestHelpAdvertisesQuickstart(t *testing.T) {
 	for _, want := range []string{
 		"shepherd quickstart [-r claude|codex] [-C DIR]",
 		"shepherd list [--json]",
+		"shepherd doctor [--deep]",
 		"Ctrl-G            resize snapshot/context",
 		"Ctrl-R            rename a workstream or edit/clear a session title",
 		"Ctrl-T            mark a session; Ctrl-T on a workstream moves or adopts it",
@@ -173,6 +177,51 @@ func TestSupportedTmuxVersion(t *testing.T) {
 	}
 }
 
+func TestDeepDoctorAcceptsFreshPrivateInstallWithoutRunningServer(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	root := filepath.Join(t.TempDir(), "shepherd-home")
+	store := workstream.FileStore{
+		Path: filepath.Join(root, "state.json"), Artifacts: filepath.Join(root, "workstreams"),
+	}
+	var output bytes.Buffer
+	if failed := deepDoctorFailed(&output, filepath.Join(root, "config.json"), store, "shepherd-doctor-fresh-test"); failed {
+		t.Fatalf("fresh deep doctor failed:\n%s", output.String())
+	}
+	for _, want := range []string{"[ok]      state", "[ok]      lock", "socket  inactive"} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("deep doctor output lacks %q:\n%s", want, output.String())
+		}
+	}
+}
+
+func TestDoctorPrivatePathRejectsBroadPermissionsAndSymlinks(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "state.json")
+	if err := os.WriteFile(path, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	check := doctorPermission{label: "state", path: path}
+	if !doctorPrivatePath(&output, check) {
+		t.Fatalf("private file rejected: %s", output.String())
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if doctorPrivatePath(io.Discard, check) {
+		t.Fatal("world-readable state file accepted")
+	}
+	link := filepath.Join(root, "linked-state.json")
+	if err := os.Symlink(path, link); err != nil {
+		t.Fatal(err)
+	}
+	if doctorPrivatePath(io.Discard, doctorPermission{label: "state", path: link}) {
+		t.Fatal("state symlink accepted")
+	}
+}
+
 func TestResolveWorkstreamByNameAndRejectAmbiguity(t *testing.T) {
 	snapshot := control.Snapshot{Workstreams: []workstream.Workstream{
 		{ID: "018f0000-0000-4000-8000-000000000001", Name: "Shepherd Core"},
@@ -251,6 +300,20 @@ func TestMachineSnapshotIncludesDurableTitleAndHonestUnknownExit(t *testing.T) {
 	}
 	if exitCode, exists := decodedSession["exit_code"]; !exists || exitCode != nil {
 		t.Fatalf("unknown exit_code = %#v (present %v), want explicit null", exitCode, exists)
+	}
+}
+
+func TestMachineSnapshotIncludesDegradedReason(t *testing.T) {
+	runtime := shepherd.Session{
+		ID: "damaged-runtime", Name: "damaged-runtime", Status: shepherd.StatusLive,
+		ObservationError: "invalid Shepherd runtime identity metadata",
+	}
+	machine := newCLISnapshot(control.Snapshot{Orphans: []control.Session{{
+		ID: runtime.ID, Status: control.StatusDegraded, Orphaned: true, Runtime: &runtime,
+	}}})
+	if len(machine.Sessions) != 1 || machine.Sessions[0].State != "degraded" ||
+		machine.Sessions[0].DegradedReason != runtime.ObservationError {
+		t.Fatalf("degraded machine projection = %#v", machine.Sessions)
 	}
 }
 

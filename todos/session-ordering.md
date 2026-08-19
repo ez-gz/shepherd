@@ -1,6 +1,6 @@
 # Session ordering within a workstream
 
-Status: implemented in 0.7.9.
+Status: included in 0.8.0.
 
 ## Contract
 

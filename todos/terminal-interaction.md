@@ -1,6 +1,6 @@
 # Attached terminal interaction
 
-Status: shipped in 0.7.9.
+Status: included in 0.8.0.
 
 ## The problem
 

@@ -330,6 +330,19 @@ func TestStatusLabelDistinguishesUnknownExitFromKnownSuccess(t *testing.T) {
 	}
 }
 
+func TestDegradedStatusExplainsSafeRemainingActions(t *testing.T) {
+	runtime := shepherd.Session{Status: shepherd.StatusLive, ObservationError: "invalid prompt metadata"}
+	session := control.Session{Status: control.StatusDegraded, Runtime: &runtime}
+	icon, label := statusLabel(session)
+	if icon != "!" || label != "degraded" {
+		t.Fatalf("degraded label = %q %q", icon, label)
+	}
+	message := unavailableMessage(session)
+	if !strings.Contains(message, "invalid prompt metadata") || !strings.Contains(message, "attach or stop") {
+		t.Fatalf("degraded message = %q", message)
+	}
+}
+
 func TestRowsGroupDurableSessionsAndKeepOrphansSeparate(t *testing.T) {
 	model, _ := newTestModel("/tmp", shepherd.BackendCodex)
 	now := time.Now()

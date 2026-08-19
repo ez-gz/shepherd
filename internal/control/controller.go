@@ -24,6 +24,7 @@ const (
 	StatusStopped     Status = "stopped"
 	StatusStartFailed Status = "start_failed"
 	StatusUnavailable Status = "unavailable"
+	StatusDegraded    Status = "degraded"
 )
 
 type Session struct {
@@ -277,7 +278,7 @@ func (c *Controller) Snapshot(ctx context.Context) (Snapshot, error) {
 		for index := range state.Sessions {
 			record := &state.Sessions[index]
 			runtime, ok := runtimeByID[record.ID]
-			if !ok {
+			if !ok || runtime.Degraded() {
 				continue
 			}
 			binding := runtimeBinding(c.socket, runtime, now)
@@ -375,6 +376,9 @@ func (c *Controller) startLocked(ctx context.Context, request StartRequest) (Ses
 	prompt := request.Prompt
 	if strings.TrimSpace(prompt) == "" {
 		return Session{}, errors.New("prompt cannot be empty")
+	}
+	if err := shepherd.ValidateInteractivePayload("prompt", prompt); err != nil {
+		return Session{}, err
 	}
 	if _, err := shepherd.ParseBackend(string(request.Backend)); err != nil {
 		return Session{}, err
@@ -787,6 +791,10 @@ func (c *Controller) send(ctx context.Context, id, message string) error {
 	if err != nil {
 		return err
 	}
+	if runtime.Degraded() {
+		return fmt.Errorf("session %s metadata is degraded: %s; attach or stop it instead of injecting input",
+			runtime.ID, runtime.ObservationError)
+	}
 	return c.supervisor.Send(ctx, runtime, message)
 }
 
@@ -989,7 +997,13 @@ func (c *Controller) createWorkstream(ctx context.Context, name, description str
 		ArtifactDir: filepath.Join(c.store.ArtifactBase(), id), Roots: normalized,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	if err := os.MkdirAll(item.ArtifactDir, 0o700); err != nil {
+	if err := os.MkdirAll(c.store.ArtifactBase(), 0o700); err != nil {
+		return workstream.Workstream{}, fmt.Errorf("create workstream artifact base: %w", err)
+	}
+	// The generated id makes this directory ours only when Mkdir creates it.
+	// Refuse an unexpected collision so a later state failure can never remove
+	// a pre-existing directory that belongs to somebody else.
+	if err := os.Mkdir(item.ArtifactDir, 0o700); err != nil {
 		return workstream.Workstream{}, fmt.Errorf("create workstream artifact directory: %w", err)
 	}
 	_, err = c.store.Mutate(ctx, func(state *workstream.State) (bool, error) {
@@ -1001,6 +1015,12 @@ func (c *Controller) createWorkstream(ctx context.Context, name, description str
 		state.Workstreams = append(state.Workstreams, item)
 		return true, nil
 	})
+	if err != nil {
+		if removeErr := os.Remove(item.ArtifactDir); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			return workstream.Workstream{}, errors.Join(err,
+				fmt.Errorf("remove unused workstream artifact directory: %w", removeErr))
+		}
+	}
 	return item, err
 }
 
@@ -1230,6 +1250,10 @@ func (c *Controller) adoptSession(ctx context.Context, sessionID, workstreamID s
 	if err != nil {
 		return Session{}, err
 	}
+	if runtime.Degraded() {
+		return Session{}, fmt.Errorf("cannot adopt session %s while its tmux metadata is degraded: %s",
+			runtime.ID, runtime.ObservationError)
+	}
 	now := c.now()
 	createdAt := runtime.StartedAt
 	if createdAt.IsZero() {
@@ -1412,7 +1436,9 @@ func project(state workstream.State, runtimes []shepherd.Session, path string) S
 		}
 		copy := runtime
 		status := StatusExited
-		if runtime.Alive() {
+		if runtime.Degraded() {
+			status = StatusDegraded
+		} else if runtime.Alive() {
 			status = StatusLive
 		}
 		snapshot.Orphans = append(snapshot.Orphans, Session{
@@ -1464,7 +1490,9 @@ func applyMembershipOrder(snapshot *Snapshot, state workstream.State) {
 func projectOne(state workstream.State, record workstream.SessionRecord, runtime *shepherd.Session) Session {
 	status := StatusUnavailable
 	if runtime != nil {
-		if runtime.Alive() {
+		if runtime.Degraded() {
+			status = StatusDegraded
+		} else if runtime.Alive() {
 			status = StatusLive
 		} else {
 			status = StatusExited

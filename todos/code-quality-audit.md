@@ -1,7 +1,7 @@
 # Code-quality and reliability audit
 
 This backlog captures the August 2026 audit of tmux/process execution,
-configuration and filesystem safety, diagnostics, CLI packaging, and release
+configuration and filesystem safety, runtime health, CLI packaging, and release
 hygiene. The full test suite, vet, race detector, and real tmux integration
 tests passed during the audit.
 
@@ -24,14 +24,15 @@ tests passed during the audit.
 
 ### P1 · operational reliability
 
-- [ ] Add a redacted, rotating diagnostic log inside the Shepherd home directory.
-  Record operation, version, socket, session ID, duration, exit status, and
-  cancellation cause; never record prompts, messages, argv payloads, or
-  environment values.
-- [ ] Preserve typed tmux command failures and surface every marker-bearing pane
-  whose required metadata cannot be parsed instead of silently dropping it from
-  the normal dashboard projection. Lifecycle deletion already uses a separate,
-  metadata-independent existence check.
+- [x] Decision: do not add a diagnostic log or support bundle. Deep checks print
+  bounded health results on demand without creating another sensitive artifact
+  lifecycle.
+- [x] Surface every marker-bearing pane whose required metadata cannot be parsed
+  as a degraded observation instead of silently dropping it. Degraded panes do
+  not rewrite durable lifecycle state or accept injected input, while attach,
+  capture, and stop remain available.
+- [ ] Preserve typed tmux command failures internally if future recovery logic
+  needs to distinguish more than the current bounded user-facing error.
 - [ ] Make the terminal preview honest about what `capture-pane` can return. A
   full-screen runner on the alternate screen has no scrollback, so `-S -120`
   yields its visible frame plus whatever normal-screen history preceded it.
@@ -62,12 +63,15 @@ tests passed during the audit.
 
 ### P2 · hardening
 
-- [ ] Extend `shepherd doctor` with bounded, non-destructive state validation,
-  lifecycle-lock, tmux socket, permissions, and diagnostic-log checks.
-- [ ] Bound prompt and follow-up payload sizes before durable storage or tmux
+- [x] Extend `shepherd doctor --deep` with bounded state validation,
+  lifecycle-lock, tmux socket, permissions, pane-health, mouse, and clipboard
+  checks. It writes no diagnostic log.
+- [x] Bound prompt and follow-up payload sizes before durable storage or tmux
   transport; use a non-argv transport if large prompts become a requirement.
-- [ ] Remove a newly created empty artifact directory when workstream state
+- [x] Remove a newly created empty artifact directory when workstream state
   creation fails.
+- [x] Smoke the actual local install shape, a fresh private home, and a schema-v4
+  state from 0.7.9 in both `make check` and CI.
 - [x] Route and test `shepherd --version` before dashboard flag parsing.
 - [x] Make selected organizer rows valid UTF-8 and width-safe down to one column.
 - [x] Add deterministic tests for abandoned artifact reads, coalesced polling,
@@ -100,12 +104,10 @@ tests passed during the audit.
 
 ## Ordered cleanup
 
-1. Add durable redacted diagnostics and typed tmux errors.
-2. Make malformed Shepherd pane metadata visible in the normal projection.
-3. Replace the remaining independent lifecycle confirmation fields only if a
+1. Preserve typed tmux errors only when a concrete recovery path needs them.
+2. Replace the remaining independent lifecycle confirmation fields only if a
    typed state makes those transitions materially clearer.
-4. Split the large UI file further by screen without building a generic
+3. Split the large UI file further by screen without building a generic
    framework.
-5. Expand `shepherd doctor` around the real state, lock, tmux, and log boundaries.
-6. Add explicit payload limits or a large-prompt transport.
-7. Reconcile failed workstream artifact-directory creation.
+4. Decide whether the terminal-frame preview should be cropped further; keep it
+   explicitly labeled as a frame rather than history.

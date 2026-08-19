@@ -17,6 +17,19 @@ const (
 	BackendNoAgent Backend = "no-agent"
 )
 
+// MaxInteractivePayloadBytes bounds text routed through durable state, tmux
+// command construction, or pane input. 64 KiB is ample for an interactive turn
+// while staying comfortably below platform argv and tmux transport limits even
+// after launch metadata is base64 encoded.
+const MaxInteractivePayloadBytes = 64 << 10
+
+func ValidateInteractivePayload(kind, value string) error {
+	if len([]byte(value)) > MaxInteractivePayloadBytes {
+		return fmt.Errorf("%s is %d bytes; maximum is %d bytes", kind, len([]byte(value)), MaxInteractivePayloadBytes)
+	}
+	return nil
+}
+
 func ParseBackend(value string) (Backend, error) {
 	switch Backend(strings.ToLower(strings.TrimSpace(value))) {
 	case BackendCodex:
@@ -79,9 +92,15 @@ type Session struct {
 	AttachedClients int
 	PaneInMode      bool
 	InputDisabled   bool
+	// ObservationError explains why Shepherd could identify the pane but could
+	// not trust all of its metadata. Degraded observations are deliberately
+	// visible and operable for attach/capture/stop, but must never be used to
+	// rewrite durable lifecycle state or receive injected input.
+	ObservationError string
 }
 
-func (s Session) Alive() bool { return s.Status == StatusLive }
+func (s Session) Alive() bool    { return s.Status == StatusLive }
+func (s Session) Degraded() bool { return strings.TrimSpace(s.ObservationError) != "" }
 
 func (s Session) Runtime(now time.Time) time.Duration {
 	end := now

@@ -958,6 +958,10 @@ func (m Model) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.errorText = "this runtime is unavailable"
 			return m, nil
 		}
+		if selected.Status == control.StatusDegraded {
+			m.errorText = "runtime metadata is degraded; attach or stop it instead"
+			return m, nil
+		}
 		m.busy = true
 		m.notice = "opening terminal…"
 		return m, m.attachCommandCmd(selected.ID)
@@ -1817,7 +1821,7 @@ func (m Model) renderDetails() string {
 	outputRoom := height - len(lines)
 	if outputRoom > 0 {
 		preview := m.preview
-		if !selected.Available() {
+		if !selected.Available() || selected.Status == control.StatusDegraded {
 			preview = unavailableMessage(selected)
 		} else if m.previewID != selected.ID {
 			preview = "loading terminal preview…"
@@ -2577,6 +2581,8 @@ func statusLabel(session control.Session) (string, string) {
 		return "●", "live"
 	case control.StatusStartFailed:
 		return "×", "start failed"
+	case control.StatusDegraded:
+		return "!", "degraded"
 	case control.StatusUnavailable:
 		return "?", "unavailable"
 	case control.StatusStopped:
@@ -2600,6 +2606,11 @@ func unavailableMessage(session control.Session) string {
 		return "start failed: " + session.Record.Outcome.Error
 	}
 	switch session.Status {
+	case control.StatusDegraded:
+		if session.Runtime != nil && session.Runtime.ObservationError != "" {
+			return "runtime metadata is degraded: " + session.Runtime.ObservationError + "; attach or stop remains available"
+		}
+		return "runtime metadata is degraded; attach or stop remains available"
 	case control.StatusStopped:
 		return "runtime was explicitly stopped; the durable session record remains"
 	case control.StatusExited:

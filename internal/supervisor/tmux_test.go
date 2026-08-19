@@ -116,6 +116,68 @@ func TestParseSessionRejectsMalformedNonemptyExitCode(t *testing.T) {
 	}
 }
 
+func TestDegradedSessionPreservesSafeRuntimeIdentityAndLifecycle(t *testing.T) {
+	fields := []string{
+		"shepherd-test", "%1", "018f0000-0000-4000-8000-000000000000", "%1",
+		"", "codex", "not-a-time", runner.Encode("task"), runner.Encode("/tmp/root"),
+		"1", "not-a-code", "1042", "1042", "/tmp/root", "codex", "2", "1", "0", "",
+	}
+	_, cause := parseSession(fields)
+	if cause == nil {
+		t.Fatal("fixture unexpectedly parsed")
+	}
+	session := degradedSession(fields, cause)
+	if !session.Degraded() || session.ID != fields[2] || session.Name != fields[0] || session.PaneID != fields[1] {
+		t.Fatalf("degraded identity = %#v", session)
+	}
+	if session.Status != shepherd.StatusExited || session.AttachedClients != 2 || !session.PaneInMode {
+		t.Fatalf("degraded lifecycle = %#v", session)
+	}
+	if session.ExitCode != nil {
+		t.Fatalf("degraded observation guessed an exit code: %v", *session.ExitCode)
+	}
+}
+
+func TestProjectPaneKeepsCanonicalMarkerWithMissingSessionID(t *testing.T) {
+	fields := []string{
+		"damaged-runtime", "%1", "", "%1", "1", "codex", "1000",
+		runner.Encode("task"), runner.Encode("/tmp/root"), "0", "", "", "1001",
+		"/tmp/root", "codex", "0", "0", "0", "",
+	}
+	session, marked := projectPane(fields)
+	if !marked || !session.Degraded() || session.ID != "damaged-runtime" || session.Name != "damaged-runtime" {
+		t.Fatalf("missing-id marker projection = (%#v, %v)", session, marked)
+	}
+	fields[3], fields[4] = "%99", ""
+	if _, marked := projectPane(fields); marked {
+		t.Fatal("unmarked pane was projected")
+	}
+}
+
+func TestObservationErrorIsSingleLineSanitizedAndBounded(t *testing.T) {
+	got := boundedObservationError("bad\n\x1b]52;c;c2VjcmV0\x07 " + strings.Repeat("界", 300))
+	if strings.Contains(got, "\n") || strings.Contains(got, "\x1b") || strings.Contains(got, "c2VjcmV0") {
+		t.Fatalf("observation error retained unsafe content: %q", got)
+	}
+	if len([]rune(got)) != 240 {
+		t.Fatalf("observation error has %d runes, want 240", len([]rune(got)))
+	}
+}
+
+func TestInteractivePayloadLimitPrecedesTmuxIO(t *testing.T) {
+	tooLarge := strings.Repeat("x", shepherd.MaxInteractivePayloadBytes+1)
+	manager := &Tmux{}
+	if _, err := manager.Start(t.Context(), shepherd.StartRequest{
+		ID: "018f0000-0000-4000-8000-000000000000", Backend: shepherd.BackendCodex,
+		Prompt: tooLarge, Root: "/tmp",
+	}); err == nil || !strings.Contains(err.Error(), "maximum") {
+		t.Fatalf("oversized start error = %v", err)
+	}
+	if err := manager.Send(t.Context(), shepherd.Session{ID: "018f0000-0000-4000-8000-000000000000"}, tooLarge); err == nil || !strings.Contains(err.Error(), "maximum") {
+		t.Fatalf("oversized send error = %v", err)
+	}
+}
+
 func exitCodePointer(code int) *int { return &code }
 
 func TestParseSessionIgnoresMalformedOptionalUserMessage(t *testing.T) {

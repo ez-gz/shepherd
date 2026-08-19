@@ -287,8 +287,8 @@ func (o *Observer) observeActivity(ctx context.Context, session control.Session)
 //
 // The prompt and the latest message are deliberately absent. They are the
 // user's content, and wanting a status line in a row is not a reason to hand
-// what someone typed to another program on a timer. The same rule keeps prompts
-// and messages out of the diagnostic log.
+// what someone typed to another program on a timer. The on-demand deep doctor
+// does not read them either, and Shepherd keeps no diagnostic log.
 func sessionEnvironment(session control.Session) []string {
 	return append(os.Environ(),
 		env.SessionID+"="+session.ID,

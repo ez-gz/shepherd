@@ -48,6 +48,7 @@ the controller owns the joined lifecycle projection shown by the UI:
 - `stopped`
 - `start_failed`
 - `unavailable`
+- `degraded` (the pane exists, but required Shepherd metadata is unreadable)
 
 **Agent turn state** comes only from a fresh, backend-specific observation:
 

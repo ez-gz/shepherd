@@ -85,6 +85,17 @@ func TestBootstrapInstallsCopyFirstMouseContract(t *testing.T) {
 	if command := systemClipboardCommand(); command != "" {
 		assertTmuxValue([]string{"show-options", "-sv", "copy-command"}, command)
 	}
+	health, err := manager.Inspect(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !health.ServerRunning || health.Bootstrap != ExpectedBootstrapVersion() || health.Mouse != "on" ||
+		!strings.Contains(health.DragBinding, "copy-mode") || !strings.Contains(health.CopyBinding, "copy-pipe-and-cancel") {
+		t.Fatalf("bootstrap health = %#v", health)
+	}
+	if command := systemClipboardCommand(); command != "" && health.CopyCommand != command {
+		t.Fatalf("copy command = %q, want %q", health.CopyCommand, command)
+	}
 }
 
 func TestTmuxLifecycleAndLiteralMessageDelivery(t *testing.T) {
@@ -292,8 +303,15 @@ func TestRuntimeExistsFindsPaneWithMalformedProjectionMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sessions) != 0 {
-		t.Fatalf("malformed pane unexpectedly remained projectable: %#v", sessions)
+	if len(sessions) != 1 || !sessions[0].Degraded() || sessions[0].ID != id {
+		t.Fatalf("malformed pane was not preserved as a degraded observation: %#v", sessions)
+	}
+	health, err := manager.Inspect(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(health.DegradedPanes) != 1 || health.DegradedPanes[0].ID != id || health.DegradedPanes[0].Reason == "" {
+		t.Fatalf("degraded health = %#v", health.DegradedPanes)
 	}
 	exists, err := manager.RuntimeExists(ctx, id, session.Name)
 	if err != nil {
