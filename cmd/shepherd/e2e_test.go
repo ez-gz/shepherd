@@ -692,7 +692,7 @@ func TestCLIWritesNothingOutsideItsHome(t *testing.T) {
 	}
 
 	// The pilot documents itself into the home directory on first run.
-	for _, relative := range []string{"AGENTS.md", "CLAUDE.md", "skills/manage-shepherd/SKILL.md", "state.json"} {
+	for _, relative := range []string{"AGENTS.md", "CLAUDE.md", "QUICKSTART.md", "skills/manage-shepherd/SKILL.md", "state.json"} {
 		if _, err := os.Stat(filepath.Join(harness.home, relative)); err != nil {
 			t.Fatalf("expected %s in the shepherd home: %v", relative, err)
 		}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"os"
@@ -12,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ez-gz/shepherd/internal/config"
 	"github.com/ez-gz/shepherd/internal/control"
+	"github.com/ez-gz/shepherd/internal/control/controltest"
 	"github.com/ez-gz/shepherd/internal/format"
 	"github.com/ez-gz/shepherd/internal/shepherd"
 	"github.com/ez-gz/shepherd/internal/workstream"
@@ -92,7 +93,7 @@ func TestHelpAdvertisesQuickstart(t *testing.T) {
 	var output bytes.Buffer
 	printHelp(&output)
 	for _, want := range []string{
-		"shepherd quickstart [-r claude|codex] [-C DIR]",
+		"shepherd quickstart                    launch Claude in ~/.shepherd",
 		"shepherd list [--json]",
 		"shepherd doctor [--deep]",
 		"Ctrl-G            resize snapshot/context",
@@ -107,44 +108,14 @@ func TestHelpAdvertisesQuickstart(t *testing.T) {
 	}
 }
 
-func TestQuickstartBackendPrefersClaudeAndRejectsNoAgent(t *testing.T) {
-	settings := config.Default()
-	settings.Commands[string(shepherd.BackendClaude)] = []string{"/bin/sh"}
-	settings.Commands[string(shepherd.BackendCodex)] = []string{"/bin/sh"}
-	backend, err := quickstartBackend("", settings)
-	if err != nil {
-		t.Fatal(err)
+func TestQuickstartPromptPointsAtInstalledDocument(t *testing.T) {
+	document := "/tmp/shepherd home/QUICKSTART.md"
+	prompt := quickstartPrompt(document)
+	if !strings.Contains(prompt, document) {
+		t.Fatalf("quickstart prompt %q does not point at %q", prompt, document)
 	}
-	if backend != shepherd.BackendClaude {
-		t.Fatalf("quickstart backend = %q, want claude", backend)
-	}
-	if _, err := quickstartBackend("no-agent", settings); err == nil || !strings.Contains(err.Error(), "requires") {
-		t.Fatalf("no-agent quickstart error = %v", err)
-	}
-}
-
-func TestQuickstartBackendFallsBackToCodex(t *testing.T) {
-	settings := config.Default()
-	settings.Commands[string(shepherd.BackendClaude)] = []string{"/definitely/missing/shepherd-claude"}
-	settings.Commands[string(shepherd.BackendCodex)] = []string{"/bin/sh"}
-	backend, err := quickstartBackend("", settings)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if backend != shepherd.BackendCodex {
-		t.Fatalf("quickstart fallback = %q, want codex", backend)
-	}
-	if _, err := quickstartBackend("claude", settings); err == nil {
-		t.Fatal("explicit missing Claude runner did not fail")
-	}
-}
-
-func TestQuickstartPromptEmbedsCanonicalSkill(t *testing.T) {
-	prompt := strings.Join(strings.Fields(quickstartPrompt()), " ")
-	for _, want := range []string{"name: learn-shepherd", "If this guide itself is running inside a Shepherd session", "press `Ctrl-T` to mark it", "Ctrl-b", "Ctrl-G", "Shift-Up", "Ctrl-N"} {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("quickstart prompt is missing %q", want)
-		}
+	if len(prompt) >= 512 {
+		t.Fatalf("quickstart prompt is %d bytes; it should remain a small file pointer", len(prompt))
 	}
 }
 
@@ -153,6 +124,100 @@ func TestQuickstartHelpReturnsSuccess(t *testing.T) {
 	application := &app{out: &output, err: &output, workdir: func() string { return t.TempDir() }}
 	if err := application.runQuickstart([]string{"-h"}); err != nil {
 		t.Fatalf("quickstart help: %v", err)
+	}
+}
+
+func TestLaunchQuickstartSeedsFirstInstallBeforeStartingTitledClaude(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), ".shepherd")
+	t.Setenv("SHEPHERD_HOME", dir)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	store := workstream.FileStore{
+		Path: filepath.Join(dir, "state.json"), Artifacts: filepath.Join(dir, "workstreams"),
+	}
+	now := time.Now()
+	manager := workstream.Workstream{
+		ID: testWorkstreamID, Name: ManagersWorkstreamName, Description: managersWorkstreamDescription,
+		ArtifactDir: filepath.Join(store.Artifacts, testWorkstreamID), Roots: []string{dir},
+		Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	var events []string
+	var workstreams []workstream.Workstream
+	var started control.StartRequest
+	var title string
+	service := &controltest.Stub{
+		CreateWorkstreamFunc: func(_ context.Context, name, description string, roots []string) (workstream.Workstream, error) {
+			events = append(events, "create-workstream")
+			if name != ManagersWorkstreamName || description != managersWorkstreamDescription || len(roots) != 1 || roots[0] != dir {
+				t.Fatalf("manager workstream = %q, %q, %v", name, description, roots)
+			}
+			workstreams = append(workstreams, manager)
+			if err := os.WriteFile(store.Path, []byte("first durable write"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return manager, nil
+		},
+		SnapshotFunc: func(context.Context) (control.Snapshot, error) {
+			events = append(events, "snapshot")
+			return control.Snapshot{Workstreams: workstreams}, nil
+		},
+		StartFunc: func(_ context.Context, request control.StartRequest) (control.Session, error) {
+			events = append(events, "start")
+			started = request
+			return control.Session{ID: testSessionID}, nil
+		},
+		SetSessionTitleFunc: func(_ context.Context, id, value string) error {
+			events = append(events, "title")
+			if id != testSessionID {
+				t.Fatalf("titled session %q, want %q", id, testSessionID)
+			}
+			title = value
+			return nil
+		},
+	}
+
+	if _, err := launchQuickstart(context.Background(), service, store, dir, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Join(events, ","), "create-workstream,snapshot,start,title"; got != want {
+		t.Fatalf("quickstart events = %q, want %q", got, want)
+	}
+	if started.Backend != shepherd.BackendClaude || started.Root != dir || started.WorkstreamID != testWorkstreamID {
+		t.Fatalf("quickstart request = %+v", started)
+	}
+	if !strings.Contains(started.Prompt, filepath.Join(dir, quickstartDocumentName)) || len(started.Prompt) >= 512 {
+		t.Fatalf("quickstart prompt = %q", started.Prompt)
+	}
+	if title != "Quickstart" {
+		t.Fatalf("quickstart title = %q", title)
+	}
+}
+
+func TestLaunchQuickstartDoesNotRecreateManagersWorkstreamAfterFirstStartup(t *testing.T) {
+	dir := t.TempDir()
+	store := workstream.FileStore{Path: filepath.Join(dir, "state.json"), Artifacts: filepath.Join(dir, "workstreams")}
+	if err := os.WriteFile(store.Path, []byte("existing durable state"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	created := false
+	service := &controltest.Stub{
+		CreateWorkstreamFunc: func(context.Context, string, string, []string) (workstream.Workstream, error) {
+			created = true
+			return workstream.Workstream{}, nil
+		},
+		StartFunc: func(_ context.Context, request control.StartRequest) (control.Session, error) {
+			if request.WorkstreamID != "" {
+				t.Fatalf("quickstart joined unexpected workstream %q", request.WorkstreamID)
+			}
+			return control.Session{ID: testSessionID}, nil
+		},
+	}
+	if _, err := launchQuickstart(context.Background(), service, store, dir, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if created {
+		t.Fatal("quickstart recreated the managers workstream after first startup")
 	}
 }
 

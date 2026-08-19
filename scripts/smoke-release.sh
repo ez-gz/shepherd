@@ -36,6 +36,8 @@ HOME="$user_home" \
 	SHEPHERD_CODEX_BIN="$fake_codex" \
 	SHEPHERD_TMUX_SOCKET="$socket" \
 	"$prefix/bin/shepherd" doctor --deep >/dev/null
+test -f "$fresh_home/QUICKSTART.md"
+cmp -s "$fresh_home/QUICKSTART.md" "$root/skills/learn-shepherd/SKILL.md"
 
 upgrade_artifacts="$upgrade_home/workstreams"
 upgrade_root="$scratch/upgrade-root"

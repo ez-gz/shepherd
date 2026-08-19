@@ -69,14 +69,18 @@ Override the destination with `make install PREFIX=/somewhere`.
 For an agent-guided first run, run:
 
 ```sh
+cd ~/code/my-project
 shepherd quickstart
 ```
 
-This embeds the [`learn-shepherd` skill](skills/learn-shepherd/SKILL.md) in the
-installed binary, prefers Claude when its configured executable is available,
-falls back to Codex, starts a real durable Shepherd session, and attaches to it
-immediately. Use
-`shepherd quickstart -r codex` or `shepherd quickstart -r claude` to choose explicitly.
+On first use Shepherd installs the [`learn-shepherd` guide](skills/learn-shepherd/SKILL.md)
+as `~/.shepherd/QUICKSTART.md`. This command starts a real durable Claude session
+inside `~/.shepherd`, gives it the title `Quickstart`, points it at that file,
+and attaches immediately. Because the session starts in Shepherd's own home, it
+also sees the installed agent contract and CLI skill instead of carrying either
+one in an oversized launch prompt. After you detach, the dashboard keeps the
+directory where you invoked `shepherd quickstart` as the launch root for your
+first project workstream.
 
 The guide's first lesson is how to detach. Press `Ctrl-b`, release both keys,
 then press `d`; `shepherd quickstart` will open the dashboard with the guide selected
@@ -331,12 +335,15 @@ Shepherd's state. Shepherd writes the instructions for one into `~/.shepherd`:
 ~/.shepherd/
   AGENTS.md                       operating contract, read by Codex and Claude
   CLAUDE.md                       pointer to AGENTS.md
+  QUICKSTART.md                   interactive first-use guide read by Claude
   skills/manage-shepherd/SKILL.md   the full command reference
 ```
 
 A new installation is also seeded with one workstream named `shepherd-managers`,
 rooted only at `~/.shepherd`, so there is somewhere to launch pilots from the
-dashboard without building it by hand.
+dashboard without building it by hand. `shepherd quickstart` performs that
+one-time provisioning before it records the Quickstart session, and places the
+session in the workstream.
 
 It is seeded only on an installation that has never written durable state, and
 the state file is what marks that: reads never create it and no-op mutations

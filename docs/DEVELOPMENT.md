@@ -17,7 +17,9 @@ binary through `//go:embed`, which reads them **at compile time**. Editing the
 Markdown is the whole change; there is nothing to regenerate.
 
 So: change `quickstartPrompt`, change a help string, change a skill file — none
-of them need a build.
+of them need a generated-file step. The embedded `learn-shepherd` skill is
+installed as `~/.shepherd/QUICKSTART.md`; the launch prompt is intentionally
+only a short pointer to that file.
 
 ## What does gate a change: the tag
 

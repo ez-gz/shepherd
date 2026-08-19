@@ -280,8 +280,9 @@ controller exposes now has a CLI verb, so an ordinary agent running in
 `~/.shepherd` can maintain Shepherd's durable state through the same typed command
 plane the dashboard uses. Its instructions are embedded in the binary and
 installed as `AGENTS.md`, a `CLAUDE.md` pointer, and
-`skills/manage-shepherd/SKILL.md`; existing files are never overwritten, so user
-edits survive an upgrade and `shepherd init --force` is the explicit refresh.
+`skills/manage-shepherd/SKILL.md`. The human onboarding guide is installed beside
+them as `QUICKSTART.md`. Existing files are never overwritten, so user edits
+survive an upgrade and `shepherd init --force` is the explicit refresh.
 
 A new installation is seeded with a `shepherd-managers` workstream rooted only at
 the home directory, so a pilot can be launched from the dashboard without
@@ -292,6 +293,14 @@ resurrected one the user deleted on purpose, and a separate provisioning marker
 would have been a second source of truth for a question the state file already
 answers. An installation that already has state is never seeded implicitly;
 `shepherd init` is the explicit opt-in and the way back after a deletion.
+
+`shepherd quickstart` is a normal titled Claude session, not a special runner.
+It starts in the Shepherd home, reads `QUICKSTART.md` through a small pointer
+prompt, and joins `shepherd-managers` when that workstream exists. On a fresh
+installation the workstream is provisioned before the session is recorded;
+otherwise the session's first durable write would consume the one-time marker
+and suppress provisioning. After detach, the dashboard still uses the command's
+original working directory as the project launch root.
 
 A pilot receives no authority. It shells out to `shepherd` and is therefore the local
 human at that boundary, holding no grant and leaving `localHumanAuthorizer`

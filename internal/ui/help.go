@@ -192,7 +192,7 @@ func (m Model) helpContentLines() []string {
 		description string
 	}{
 		{"shepherd", "Open the dashboard."},
-		{"shepherd quickstart [-r claude|codex] [-C DIR]", "Launch and attach an agent-guided first-use tour."},
+		{"shepherd quickstart", "Launch Claude in the Shepherd home and attach an agent-guided first-use tour."},
 		{"shepherd spawn [--json] [-r RUNNER] [-C DIR] [-w WORKSTREAM] LABEL", "Start a session without opening the dashboard; --json returns a machine-readable result."},
 		{"shepherd list [--json]", "List durable sessions and orphaned runtimes; --json returns the complete machine-readable projection."},
 		{"shepherd send [--json] ID MESSAGE", "Send a follow-up through tmux; --json returns a machine-readable result."},

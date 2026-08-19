@@ -27,7 +27,6 @@ import (
 	"github.com/ez-gz/shepherd/internal/transcript"
 	"github.com/ez-gz/shepherd/internal/ui"
 	"github.com/ez-gz/shepherd/internal/workstream"
-	learnshepherd "github.com/ez-gz/shepherd/skills/learn-shepherd"
 )
 
 var version = "0.8.0"
@@ -243,13 +242,9 @@ func (a *app) runDashboardSelected(args []string, selectedSessionID string) erro
 
 func (a *app) runQuickstart(args []string) error {
 	flags := a.newFlagSet("shepherd quickstart")
-	root := flags.String("root", a.workdir(), "project root for the guided session")
-	flags.StringVar(root, "C", *root, "project root for the guided session")
-	runnerValue := flags.String("runner", "", "guide runner: claude or codex (default: prefer claude)")
-	flags.StringVar(runnerValue, "r", *runnerValue, "guide runner: claude or codex (default: prefer claude)")
 	socket := flags.String("socket", defaultSocket(), "private tmux socket name")
 	flags.Usage = func() {
-		fmt.Fprintln(flags.Output(), "Usage: shepherd quickstart [-r claude|codex] [-C DIR]")
+		fmt.Fprintln(flags.Output(), "Usage: shepherd quickstart")
 		flags.PrintDefaults()
 	}
 	if err := flags.Parse(args); err != nil {
@@ -259,36 +254,39 @@ func (a *app) runQuickstart(args []string) error {
 		return err
 	}
 	if flags.NArg() != 0 {
-		return errors.New("usage: shepherd quickstart [-r claude|codex] [-C dir]")
+		return errors.New("usage: shepherd quickstart")
 	}
 	_, settings, err := a.settings()
 	if err != nil {
 		return err
 	}
-	backend, err := quickstartBackend(*runnerValue, settings)
+	projectRoot, err := filepath.Abs(a.workdir())
+	if err != nil {
+		return fmt.Errorf("resolve dashboard root: %w", err)
+	}
+	if _, err := runner.ResolveCommand(shepherd.BackendClaude, settings.Command(shepherd.BackendClaude)); err != nil {
+		return fmt.Errorf("quickstart requires Claude: %w", err)
+	}
+	dir, _, err := installPilotDocs(false)
 	if err != nil {
 		return err
 	}
-	absRoot, err := filepath.Abs(*root)
+	stateStore, err := workstream.DefaultStore()
 	if err != nil {
-		return fmt.Errorf("resolve root: %w", err)
+		return err
 	}
 	controller, err := a.dial(*socket)
 	if err != nil {
 		return err
 	}
 	startContext, cancelStart := context.WithTimeout(context.Background(), 8*time.Second)
-	session, err := controller.Start(startContext, control.StartRequest{
-		Backend: backend,
-		Prompt:  quickstartPrompt(),
-		Root:    absRoot,
-	})
+	session, err := launchQuickstart(startContext, controller, stateStore, dir, a.err)
 	cancelStart()
 	if err != nil {
 		return err
 	}
 
-	fmt.Fprintf(a.out, "started guided %s session %s\n", backend, format.ShortID(session.ID))
+	fmt.Fprintf(a.out, "started guided Claude session %s in %s\n", format.ShortID(session.ID), dir)
 	fmt.Fprintln(a.err, "attaching now · your first lesson is Ctrl-b, release, then d")
 	attachContext, cancelAttach := context.WithTimeout(context.Background(), 5*time.Second)
 	command, err := controller.AttachCommand(attachContext, session.ID)
@@ -302,40 +300,46 @@ func (a *app) runQuickstart(args []string) error {
 
 	fmt.Fprintln(a.err, "detached · opening shepherd with the guide selected")
 	return a.runDashboardSelected([]string{
-		"--runner", string(backend),
-		"--root", absRoot,
+		"--runner", string(shepherd.BackendClaude),
+		"--root", projectRoot,
 		"--socket", *socket,
 	}, session.ID)
 }
 
-func quickstartBackend(value string, settings config.Config) (shepherd.Backend, error) {
-	if strings.TrimSpace(value) != "" {
-		backend, err := shepherd.ParseBackend(value)
-		if err != nil {
-			return "", err
+func launchQuickstart(ctx context.Context, controller control.Service, store workstream.FileStore, dir string, writer io.Writer) (control.Session, error) {
+	// Provision before Start writes the first session record. The durable state
+	// file is the one-time installation marker, so reversing these two actions
+	// would permanently suppress the managers workstream on a fresh install.
+	provisionInstallation(ctx, controller, store, writer)
+
+	workstreamID := ""
+	snapshot, err := controller.Snapshot(ctx)
+	if err != nil {
+		return control.Session{}, fmt.Errorf("find the %s workstream: %w", ManagersWorkstreamName, err)
+	}
+	for _, item := range snapshot.Workstreams {
+		if item.ArchivedAt == nil && strings.EqualFold(item.Name, ManagersWorkstreamName) {
+			workstreamID = item.ID
+			break
 		}
-		if backend == shepherd.BackendNoAgent {
-			return "", errors.New("quickstart requires the claude or codex runner")
-		}
-		if _, err := runner.ResolveCommand(backend, settings.Command(backend)); err != nil {
-			return "", err
-		}
-		return backend, nil
 	}
 
-	var failures []string
-	for _, backend := range []shepherd.Backend{shepherd.BackendClaude, shepherd.BackendCodex} {
-		if _, err := runner.ResolveCommand(backend, settings.Command(backend)); err == nil {
-			return backend, nil
-		} else {
-			failures = append(failures, err.Error())
-		}
+	document := filepath.Join(dir, quickstartDocumentName)
+	session, err := controller.Start(ctx, control.StartRequest{
+		Backend: shepherd.BackendClaude, Prompt: quickstartPrompt(document), Root: dir,
+		WorkstreamID: workstreamID,
+	})
+	if err != nil {
+		return session, err
 	}
-	return "", fmt.Errorf("quickstart requires claude or codex: %s", strings.Join(failures, "; "))
+	if err := controller.SetSessionTitle(ctx, session.ID, "Quickstart"); err != nil {
+		return session, fmt.Errorf("title Quickstart session %s: %w (the session is still available in shepherd)", format.ShortID(session.ID), err)
+	}
+	return session, nil
 }
 
-func quickstartPrompt() string {
-	return "Guide me through my first Shepherd workstream and session. You are running inside the guided session created by shepherd quickstart. Follow the embedded skill below, begin with its in-session path, teach one action at a time, and wait for me after each action.\n\n" + learnshepherd.Instructions
+func quickstartPrompt(document string) string {
+	return fmt.Sprintf("You are the Shepherd Quickstart guide. Read %q and follow it exactly. Teach one action at a time and wait for me after each action.", document)
 }
 
 func (a *app) runSpawn(args []string) error {
@@ -780,8 +784,7 @@ func printHelp(writer io.Writer) {
 Usage:
   shepherd [--runner codex|claude|no-agent] [-C DIR]
                                         open the dashboard
-  shepherd quickstart [-r claude|codex] [-C DIR]
-                                        launch and attach an agent-guided tour
+  shepherd quickstart                    launch Claude in ~/.shepherd for an agent-guided tour
   shepherd spawn [--json] [-r RUNNER] [-C DIR] [-w WORKSTREAM] LABEL
                                         start a session without the dashboard
   shepherd list [--json]                      list sessions

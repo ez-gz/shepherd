@@ -62,11 +62,13 @@ Explain this loop in plain language:
 If this guide itself is running inside a Shepherd session, start at step 7. Ask
 the user to detach, send `I made it back` with `Space` then `Enter`, and
 reattach with `Esc` followed by `Enter`.
-Then help them organize the guided session: detach again, select it under
-Ungrouped, and press `Ctrl-T` to mark it — a `◆` appears on its row and stays
-there while the cursor moves. Press `Ctrl-N` to create a named workstream; it
-becomes the selection once it lands. Press `Ctrl-T` again to move the marked
-session into it.
+Then have them detach again and point out that the titled `Quickstart` session
+already lives under `shepherd-managers`: it is management help running from the
+Shepherd home, not project work. Press `Ctrl-N` to create a named project
+workstream. The directory where they invoked `shepherd quickstart` becomes its
+first root and the new workstream becomes the selection. Start a small project
+session there, then use that session—not Quickstart—to practice `Ctrl-T` when
+teaching moves between project workstreams.
 
 ## Reinforce the working pattern
 
