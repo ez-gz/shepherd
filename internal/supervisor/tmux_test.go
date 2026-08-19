@@ -133,6 +133,65 @@ func TestParseSessionIgnoresMalformedOptionalUserMessage(t *testing.T) {
 	}
 }
 
+func TestNativeStatusProjectionAcceptsOnlyTheRunnerOwnedTransport(t *testing.T) {
+	base := []string{
+		"shepherd-test", "%1", "018f0000-0000-4000-8000-000000000000", "%1",
+		"", "claude", "1000", runner.Encode("task"), runner.Encode("/tmp/root"),
+		"0", "", "", "1001", "/tmp/root", "claude", "0", "0", "0", "",
+	}
+	claudeFields := append(append([]string(nil), base...),
+		runner.Encode("Working"), runner.Encode("Opus · high · 18% ctx"), "", "forged title")
+	claude, err := parseSession(claudeFields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claude.NativeStatus != "Working · Opus · high · 18% ctx" {
+		t.Fatalf("claude native status = %q", claude.NativeStatus)
+	}
+
+	codexFields := append([]string(nil), base...)
+	codexFields[5], codexFields[14] = "codex", "codex"
+	codexFields = append(codexFields, "", "", "", "Working · gpt-5.6-codex")
+	unmarked, err := parseSession(codexFields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unmarked.NativeStatus != "" {
+		t.Fatalf("unmarked Codex title was trusted: %q", unmarked.NativeStatus)
+	}
+	codexFields[21] = "1"
+	marked, err := parseSession(codexFields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if marked.NativeStatus != "Working · gpt-5.6-codex" {
+		t.Fatalf("marked Codex title = %q", marked.NativeStatus)
+	}
+}
+
+func TestNativeStatusProjectionIsBoundedAtTheReadBoundary(t *testing.T) {
+	got := parseNativeStatus(shepherd.BackendCodex, "", "", "1", "working\n"+strings.Repeat("界", 300))
+	if strings.Contains(got, "\n") || len([]rune(got)) != runner.MaxNativeStatusRunes {
+		t.Fatalf("native status = %q (%d runes)", got, len([]rune(got)))
+	}
+	if got := parseNativeStatus(shepherd.BackendNoAgent, runner.Encode("forged"), "", "1", "forged"); got != "" {
+		t.Fatalf("no-agent accepted native status %q", got)
+	}
+}
+
+func TestNativeStatusPaneIDValidationIsStrict(t *testing.T) {
+	for _, value := range []string{"%1", "%987654"} {
+		if !validPaneID(value) {
+			t.Fatalf("valid pane id %q was rejected", value)
+		}
+	}
+	for _, value := range []string{"", "1", "%", "%1;kill-server", "%１２"} {
+		if validPaneID(value) {
+			t.Fatalf("invalid pane id %q was accepted", value)
+		}
+	}
+}
+
 func TestUserMessagePreviewIsBoundedAndSafe(t *testing.T) {
 	input := "  first\nsecond\t\x1b]52;c;c2VjcmV0\x07 " + strings.Repeat("界", 300)
 	got := userMessagePreview(input)

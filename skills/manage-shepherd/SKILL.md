@@ -39,11 +39,13 @@ shepherd ws list --json       # workstreams only, with roots and session counts
 `artifact_dir`, `roots`, `revision`. Per session: `id`, `runner`, `state`,
 `title`, `display_title`, `initial_prompt`, `latest_via_shepherd`,
 `workstream_id`, `workstream`, `root`, `available`, `alive`, `orphaned`,
-`exit_code`, `runtime_seconds`, `last_activity_at`.
+`exit_code`, `runtime_seconds`, `last_activity_at`, `native_status`.
 
 `state` is one of `live`, `exited`, `stopped`, `start_failed`, `unavailable`.
 `exit_code` is `null` when tmux cannot prove the outcome — that is an unknown
-result, not a success.
+result, not a success. `native_status`, when present, is a bounded ephemeral
+line the runner published. It is not stored in durable state and must not be
+reconstructed from `peek` output when absent.
 
 ## Workstreams
 
@@ -92,7 +94,8 @@ shepherd delete SESSION --yes                           # confirm with the user 
 shepherd peek SESSION [--lines N]                       # current frame, not history
 shepherd history SESSION [--last N] [--json]            # what the runner recorded
 shepherd conversation SESSION [--json]                  # the runner conversation id, and its source
-shepherd resume SESSION MESSAGE                         # continue that conversation in a new session
+shepherd resume SESSION MESSAGE                         # send to its live Codex owner, or resume it when unowned
+shepherd fork SESSION MESSAGE                           # explicitly branch a Codex conversation
 shepherd attach SESSION                                 # hands over the terminal
 ```
 
@@ -126,6 +129,7 @@ Notes are not state mutations. Do not route them through `shepherd`.
 | deleting a session whose tmux pane still exists | refused; stop it first, and ask the user before doing so |
 | deleting a record bound to a different tmux socket | refused; it names the socket to retry with |
 | sending to a dead pane, or one in copy mode | refused with the reason |
+| resuming a Codex conversation with multiple live owners | refused; stop one owner before continuing |
 | creating a second active workstream with an existing name | refused |
 
 These messages are specific. Show them to the user rather than paraphrasing.
@@ -136,11 +140,14 @@ These messages are specific. Show them to the user rather than paraphrasing.
   ordinary notes and artifacts
 - pass `--yes` without being asked to
 - run `shepherd spawn` or `shepherd stop` without confirming the specifics first
-- describe a session as working, ready, blocked, or needing input
+- infer working, ready, blocked, or needs-input state from terminal text;
+  report `native_status` only when Shepherd supplies it
 - present `shepherd peek` output as a record of what a session did; `shepherd history` is
   the surface that answers that, and it says when it cannot
-- run `shepherd resume` without confirming with the user first — it starts a new
-  session and sends it a message
+- run `shepherd resume` or `shepherd fork` without confirming with the user
+  first — resume sends a message and may launch when unowned; fork always
+  launches a new Codex branch
+- delete or rewrite Codex's own session lock files
 - report a conversation id without its source. `assigned` means Shepherd chose the
   id and passed it to the runner; `observed` means Shepherd matched a file the
   runner wrote. If `shepherd conversation` says nothing is registered, say that, and do

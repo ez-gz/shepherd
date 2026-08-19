@@ -41,6 +41,13 @@ type Session struct {
 	Orphaned        bool
 	Record          workstream.SessionRecord
 	Runtime         *shepherd.Session
+	// AutomaticTitle is an in-memory dashboard projection. The controller never
+	// populates or persists it; a caller may attach one before resolving briefs.
+	AutomaticTitle string
+	// ContinuedExisting is true only on the direct result of ResumeSession when
+	// a live Codex session already owned the conversation and received the
+	// message. Snapshot projections leave it false.
+	ContinuedExisting bool
 }
 
 // ConversationID is the id the runner filed this session's conversation under,
@@ -134,6 +141,7 @@ type StartRequest struct {
 	// resume path from a conversation Shepherd already registered, so no surface
 	// can start a session against an id nobody verified.
 	resume string
+	fork   bool
 }
 
 type Service interface {
@@ -141,6 +149,7 @@ type Service interface {
 	Find(context.Context, string) (Session, error)
 	Start(context.Context, StartRequest) (Session, error)
 	ResumeSession(context.Context, string, string) (Session, error)
+	ForkSession(context.Context, string, string) (Session, error)
 	RegisterConversation(context.Context, string) (workstream.Conversation, error)
 	Send(context.Context, string, string) error
 	Capture(context.Context, string, int) (string, error)
@@ -204,6 +213,9 @@ func (c *Controller) Execute(ctx context.Context, command Command) (CommandResul
 		return CommandResult{Session: session}, err
 	case ResumeSessionAction:
 		session, err := c.resumeSession(ctx, action.SessionID, action.Prompt, command.Scope.WorkstreamID)
+		return CommandResult{Session: session}, err
+	case ForkSessionAction:
+		session, err := c.forkSession(ctx, action.SessionID, action.Prompt, command.Scope.WorkstreamID)
 		return CommandResult{Session: session}, err
 	case RegisterConversationAction:
 		conversation, err := c.registerConversation(ctx, action.SessionID)
@@ -412,7 +424,7 @@ func (c *Controller) startLocked(ctx context.Context, request StartRequest) (Ses
 		startAttempted = true
 		runtime, launchErr = c.supervisor.Start(ctx, shepherd.StartRequest{
 			ID: id, Backend: request.Backend, Prompt: prompt, Root: root, Command: command,
-			Resume: request.resume,
+			Resume: request.resume, Fork: request.fork,
 		})
 	}
 	if launchErr != nil && startAttempted {
@@ -501,6 +513,11 @@ func (c *Controller) startLocked(ctx context.Context, request StartRequest) (Ses
 // exact failure the source field exists to prevent.
 func assignedConversation(request StartRequest, id string, at time.Time) *workstream.Conversation {
 	switch {
+	case request.fork:
+		// A fork creates a runner-minted identity. The source conversation is
+		// known, but the fork's new id is not, so recording the source id here
+		// would turn a branch into a second writer on paper.
+		return nil
 	case strings.TrimSpace(request.resume) != "":
 		return &workstream.Conversation{
 			ID: request.resume, Source: workstream.ConversationAssigned, RecordedAt: at,
@@ -600,6 +617,18 @@ func (c *Controller) ResumeSession(ctx context.Context, id, prompt string) (Sess
 }
 
 func (c *Controller) resumeSession(ctx context.Context, id, prompt, workstreamID string) (Session, error) {
+	var session Session
+	var resumeErr error
+	if err := c.store.WithLifecycleLock(ctx, func() error {
+		session, resumeErr = c.resumeSessionLocked(ctx, id, prompt, workstreamID)
+		return nil
+	}); err != nil {
+		return Session{}, err
+	}
+	return session, resumeErr
+}
+
+func (c *Controller) resumeSessionLocked(ctx context.Context, id, prompt, workstreamID string) (Session, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return Session{}, errors.New("session id is required")
@@ -622,10 +651,125 @@ func (c *Controller) resumeSession(ctx context.Context, id, prompt, workstreamID
 	if err != nil {
 		return Session{}, fmt.Errorf("resume session %q: %w", id, err)
 	}
-	return c.start(ctx, StartRequest{
+	if record.Backend == shepherd.BackendCodex {
+		owner, runtime, found, err := c.liveConversationOwner(ctx, conversation.ID)
+		if err != nil {
+			return Session{}, fmt.Errorf("resume session %q: %w", id, err)
+		}
+		if found {
+			if err := c.supervisor.Send(ctx, runtime, prompt); err != nil {
+				return Session{}, fmt.Errorf("continue live codex session %q: %w", owner.ID, err)
+			}
+			state, err := c.store.Load(ctx)
+			if err != nil {
+				return Session{}, err
+			}
+			view := projectOne(state, owner, &runtime)
+			view.ContinuedExisting = true
+			return view, nil
+		}
+	}
+	return c.startLocked(ctx, StartRequest{
 		Backend: record.Backend, Prompt: prompt, Root: record.InitialRoot,
 		WorkstreamID: workstreamID, resume: conversation.ID,
 	})
+}
+
+// liveConversationOwner returns the sole live durable Codex session registered
+// to a conversation. Failing closed on observation errors or a pre-existing
+// duplicate is what prevents ResumeSession from creating a third writer.
+func (c *Controller) liveConversationOwner(ctx context.Context, conversationID string) (workstream.SessionRecord, shepherd.Session, bool, error) {
+	state, err := c.store.Load(ctx)
+	if err != nil {
+		return workstream.SessionRecord{}, shepherd.Session{}, false, err
+	}
+	runtimes, err := c.supervisor.Sessions(ctx)
+	if err != nil {
+		return workstream.SessionRecord{}, shepherd.Session{}, false,
+			fmt.Errorf("cannot establish live conversation ownership: %w", err)
+	}
+	live := make(map[string]shepherd.Session, len(runtimes))
+	for _, runtime := range runtimes {
+		if runtime.Alive() {
+			live[runtime.ID] = runtime
+		}
+	}
+	var owner workstream.SessionRecord
+	var ownerRuntime shepherd.Session
+	found := false
+	for _, candidate := range state.Sessions {
+		if candidate.Backend != shepherd.BackendCodex || candidate.Conversation == nil ||
+			candidate.Conversation.ID != conversationID {
+			continue
+		}
+		runtime, ok := live[candidate.ID]
+		if !ok {
+			continue
+		}
+		if found {
+			return workstream.SessionRecord{}, shepherd.Session{}, false,
+				fmt.Errorf("codex conversation %q already has multiple live writers (%s and %s); stop one before continuing",
+					conversationID, owner.ID, candidate.ID)
+		}
+		owner, ownerRuntime, found = candidate, runtime, true
+	}
+	return owner, ownerRuntime, found, nil
+}
+
+// ForkSession explicitly branches a Codex conversation into a new session.
+func (c *Controller) ForkSession(ctx context.Context, id, prompt string) (Session, error) {
+	state, err := c.store.Load(ctx)
+	if err != nil {
+		return Session{}, err
+	}
+	workstreamID := state.WorkstreamForSession(strings.TrimSpace(id))
+	result, err := c.Execute(ctx, humanCommand(scopeForWorkstream(workstreamID), ForkSessionAction{
+		SessionID: id, Prompt: prompt,
+	}))
+	return result.Session, err
+}
+
+func (c *Controller) forkSession(ctx context.Context, id, prompt, workstreamID string) (Session, error) {
+	var session Session
+	var forkErr error
+	if err := c.store.WithLifecycleLock(ctx, func() error {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			forkErr = errors.New("session id is required")
+			return nil
+		}
+		if strings.TrimSpace(prompt) == "" {
+			forkErr = errors.New("prompt cannot be empty")
+			return nil
+		}
+		state, err := c.store.Load(ctx)
+		if err != nil {
+			forkErr = err
+			return nil
+		}
+		record, ok := state.Session(id)
+		if !ok {
+			forkErr = fmt.Errorf("durable session %q not found", id)
+			return nil
+		}
+		if record.Backend != shepherd.BackendCodex {
+			forkErr = fmt.Errorf("fork is currently supported only for codex conversations, not %s", record.Backend)
+			return nil
+		}
+		conversation, err := c.registerConversation(ctx, id)
+		if err != nil {
+			forkErr = fmt.Errorf("fork session %q: %w", id, err)
+			return nil
+		}
+		session, forkErr = c.startLocked(ctx, StartRequest{
+			Backend: record.Backend, Prompt: prompt, Root: record.InitialRoot,
+			WorkstreamID: workstreamID, resume: conversation.ID, fork: true,
+		})
+		return nil
+	}); err != nil {
+		return Session{}, err
+	}
+	return session, forkErr
 }
 
 func (c *Controller) Send(ctx context.Context, id, message string) error {

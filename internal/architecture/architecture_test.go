@@ -44,6 +44,7 @@ var allowedImports = map[string][]string{
 		"skills/learn-shepherd", "skills/manage-shepherd",
 	},
 	"internal/architecture": {},
+	"internal/autotitle":    {"internal/env", "internal/format"},
 	// brief sits above control because it describes a session, and above config
 	// because a user chooses what fills it. It stays below ui: assembling a
 	// brief can mean running a program, and process execution does not belong
@@ -71,8 +72,9 @@ var allowedImports = map[string][]string{
 	// read-only observer reach durable state.
 	"internal/transcript": {"internal/format", "internal/shepherd"},
 	"internal/ui": {
-		"internal/brief", "internal/config", "internal/control", "internal/control/controltest",
+		"internal/autotitle", "internal/brief", "internal/config", "internal/control", "internal/control/controltest",
 		"internal/format", "internal/shepherd", "internal/runner", "internal/workstream",
+		"internal/transcript",
 	},
 	"internal/workstream":    {"internal/env", "internal/shepherd", "internal/home"},
 	"skills/learn-shepherd":  {},

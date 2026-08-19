@@ -67,6 +67,16 @@ type ResumeSessionAction struct {
 
 func (ResumeSessionAction) commandAction() {}
 
+// ForkSessionAction explicitly branches a Codex conversation. Resume retains
+// one writer for the original conversation; fork is the separate verb for a
+// new native identity with copied history.
+type ForkSessionAction struct {
+	SessionID string
+	Prompt    string
+}
+
+func (ForkSessionAction) commandAction() {}
+
 // RegisterConversationAction asks Shepherd to learn the conversation id a runner
 // minted for a session it could not name at launch.
 //
@@ -282,7 +292,7 @@ func validateActionScope(command Command) error {
 	switch action := command.Action.(type) {
 	// A resume is a start: either scope is meaningful, because the scope names
 	// where the new session lands.
-	case StartAction, ResumeSessionAction:
+	case StartAction, ResumeSessionAction, ForkSessionAction:
 		return nil
 	case SendAction, StopAction, DeleteSessionAction, SetSessionTitleAction,
 		RegisterConversationAction:

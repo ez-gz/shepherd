@@ -34,6 +34,7 @@ type Stub struct {
 	FindFunc                 func(context.Context, string) (control.Session, error)
 	StartFunc                func(context.Context, control.StartRequest) (control.Session, error)
 	ResumeSessionFunc        func(context.Context, string, string) (control.Session, error)
+	ForkSessionFunc          func(context.Context, string, string) (control.Session, error)
 	RegisterConversationFunc func(context.Context, string) (workstream.Conversation, error)
 	SendFunc                 func(context.Context, string, string) error
 	CaptureFunc              func(context.Context, string, int) (string, error)
@@ -81,6 +82,13 @@ func (s *Stub) Start(ctx context.Context, request control.StartRequest) (control
 func (s *Stub) ResumeSession(ctx context.Context, id, prompt string) (control.Session, error) {
 	if s.ResumeSessionFunc != nil {
 		return s.ResumeSessionFunc(ctx, id, prompt)
+	}
+	return control.Session{}, nil
+}
+
+func (s *Stub) ForkSession(ctx context.Context, id, prompt string) (control.Session, error) {
+	if s.ForkSessionFunc != nil {
+		return s.ForkSessionFunc(ctx, id, prompt)
 	}
 	return control.Session{}, nil
 }

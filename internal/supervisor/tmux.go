@@ -25,7 +25,10 @@ import (
 )
 
 const (
-	DefaultSocket = "shepherd"
+	DefaultSocket       = "shepherd"
+	nativeStateOption   = "@shepherd_native_state"
+	nativeMetricsOption = "@shepherd_native_metrics"
+	codexTitleMarker    = "@shepherd_codex_title"
 	// bootstrapVersion is the marker that lets a long-lived server skip
 	// reconfiguration. Bump it whenever the option set changes, or servers
 	// already running keep the configuration they were started with.
@@ -157,6 +160,10 @@ func (t *Tmux) Sessions(ctx context.Context) ([]shepherd.Session, error) {
 		"#{pane_in_mode}",
 		"#{pane_input_off}",
 		"#{@shepherd_last_user_message}",
+		"#{@shepherd_native_state}",
+		"#{@shepherd_native_metrics}",
+		"#{@shepherd_codex_title}",
+		"#{pane_title}",
 	}
 
 	rows, err := t.listPaneFields(ctx, formatFields)
@@ -373,7 +380,7 @@ func (t *Tmux) Start(ctx context.Context, request shepherd.StartRequest) (shephe
 		newSession = append(newSession,
 			t.executable, "__agent", string(request.Backend),
 			runner.Encode(request.Prompt), runner.Encode(title), encodedCommand,
-			runner.Encode(request.Resume),
+			runner.Encode(request.Resume), forkArgument(request.Fork),
 		)
 	}
 	commands := [][]string{
@@ -384,6 +391,15 @@ func (t *Tmux) Start(ctx context.Context, request shepherd.StartRequest) (shephe
 		{"set-option", "-t", name, "@shepherd_started", strconv.FormatInt(started.Unix(), 10)},
 		{"set-option", "-t", name, "@shepherd_prompt", runner.Encode(request.Prompt)},
 		{"set-option", "-t", name, "@shepherd_root", runner.Encode(root)},
+	}
+	if request.Backend == shepherd.BackendCodex {
+		// Clear tmux's default title before marking the pane. From this point on,
+		// pane_title is accepted as native status because this launch installed
+		// Codex's terminal-title contract. Older panes have no marker.
+		commands = append(commands,
+			[]string{"select-pane", "-t", name + ":0.0", "-T", ""},
+			[]string{"set-option", "-p", "-t", name + ":0.0", codexTitleMarker, "1"},
+		)
 	}
 	output, err := t.run(ctx, nil, joinTmuxCommands(commands)...)
 	if err != nil {
@@ -405,6 +421,13 @@ func (t *Tmux) Start(ctx context.Context, request shepherd.StartRequest) (shephe
 		Prompt: request.Prompt, Root: root, CurrentPath: root,
 		Status: shepherd.StatusLive, StartedAt: started,
 	}, nil
+}
+
+func forkArgument(fork bool) string {
+	if fork {
+		return "1"
+	}
+	return "0"
 }
 
 func (t *Tmux) Send(ctx context.Context, session shepherd.Session, message string) error {
@@ -509,6 +532,15 @@ func (t *Tmux) run(ctx context.Context, input []byte, args ...string) ([]byte, e
 }
 
 func parseSession(fields []string) (shepherd.Session, error) {
+	if len(fields) < 19 {
+		return shepherd.Session{}, fmt.Errorf("tmux session has %d fields, want at least 19", len(fields))
+	}
+	// The final four fields are optional presentation metadata added after the
+	// lifecycle projection. Treat an absent value as empty so fixtures and any
+	// transitional caller cannot turn a missing status into a lost runtime.
+	for len(fields) < 23 {
+		fields = append(fields, "")
+	}
 	backend, err := shepherd.ParseBackend(fields[5])
 	if err != nil {
 		return shepherd.Session{}, err
@@ -528,6 +560,7 @@ func parseSession(fields []string) (shepherd.Session, error) {
 	// This option is optional presentation metadata. A malformed value must not
 	// hide an otherwise valid runtime from discovery.
 	lastUserMessage, _ := decodeMetadata(fields[18])
+	nativeStatus := parseNativeStatus(backend, fields[19], fields[20], fields[21], fields[22])
 	deadUnix, _ := strconv.ParseInt(fields[11], 10, 64)
 	activityUnix, _ := strconv.ParseInt(fields[12], 10, 64)
 	attached, _ := strconv.Atoi(fields[15])
@@ -550,13 +583,81 @@ func parseSession(fields []string) (shepherd.Session, error) {
 	}
 	return shepherd.Session{
 		Name: fields[0], PaneID: fields[1], ID: fields[2], Backend: backend,
-		Prompt: prompt, LastUserMessage: lastUserMessage, Root: root, Status: status,
+		Prompt: prompt, LastUserMessage: lastUserMessage, NativeStatus: nativeStatus,
+		Root: root, Status: status,
 		StartedAt: time.Unix(startedUnix, 0), EndedAt: unixTime(deadUnix),
 		LastActivityAt: unixTime(activityUnix), ExitCode: exitCode,
 		CurrentPath: fields[13], CurrentCommand: fields[14],
 		AttachedClients: attached, PaneInMode: paneModeCount != 0,
 		InputDisabled: fields[17] == "1",
 	}, nil
+}
+
+func parseNativeStatus(backend shepherd.Backend, encodedState, encodedMetrics, titleMarker, paneTitle string) string {
+	switch backend {
+	case shepherd.BackendClaude:
+		state, _ := decodeMetadata(encodedState)
+		metrics, _ := decodeMetadata(encodedMetrics)
+		return runner.BoundedNativeStatus(strings.Join(nonemptyStatusParts(state, metrics), " · "))
+	case shepherd.BackendCodex:
+		if titleMarker != "1" {
+			return ""
+		}
+		return runner.BoundedNativeStatus(paneTitle)
+	default:
+		return ""
+	}
+}
+
+func nonemptyStatusParts(values ...string) []string {
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = runner.BoundedNativeStatus(value); value != "" {
+			parts = append(parts, value)
+		}
+	}
+	return parts
+}
+
+// PublishNativeStatus writes one Claude callback into pane-scoped tmux
+// metadata. The callback runs inside the pane, so TMUX_PANE is the authority;
+// values are base64 encoded and later sanitized and bounded again on read.
+func PublishNativeStatus(ctx context.Context, update runner.NativeStatusUpdate) error {
+	pane := strings.TrimSpace(os.Getenv("TMUX_PANE"))
+	if !validPaneID(pane) {
+		return errors.New("native status callback is not running in a tmux pane")
+	}
+	binary, err := exec.LookPath("tmux")
+	if err != nil {
+		return fmt.Errorf("publish native status: %w", err)
+	}
+	commands := make([][]string, 0, 2)
+	if state := runner.BoundedNativeStatus(update.State); state != "" {
+		commands = append(commands, []string{"set-option", "-p", "-t", pane, nativeStateOption, runner.Encode(state)})
+	}
+	if metrics := runner.BoundedNativeStatus(update.Metrics); metrics != "" {
+		commands = append(commands, []string{"set-option", "-p", "-t", pane, nativeMetricsOption, runner.Encode(metrics)})
+	}
+	if len(commands) == 0 {
+		return nil
+	}
+	command := exec.CommandContext(ctx, binary, joinTmuxCommands(commands)...)
+	if output, err := command.CombinedOutput(); err != nil {
+		return fmt.Errorf("publish native status: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func validPaneID(value string) bool {
+	if len(value) < 2 || value[0] != '%' {
+		return false
+	}
+	for _, character := range value[1:] {
+		if character < '0' || character > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func userMessagePreview(message string) string {

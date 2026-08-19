@@ -10,17 +10,20 @@ import (
 	"github.com/ez-gz/shepherd/internal/workstream"
 )
 
-// runResume continues a session's native conversation in a new pane.
+// runResume continues a session's native conversation. Codex conversations
+// keep one live writer: when one exists, the message is sent to that owner;
+// only an unowned conversation starts a new pane.
 //
 // This is the verb the durable conversation registration exists for. A tmux
 // pane dies and the session becomes unreachable, but the runner wrote the
 // conversation to disk and Shepherd knows its id — so the work can be picked up
 // where it stopped instead of restarted cold.
 //
-// It deliberately creates a new session rather than reviving the old record.
-// The old record is the history of what already happened, including how it
-// ended; rewriting it to look alive would destroy the one durable account of
-// that. The new session records the conversation it was handed.
+// When no owner is live it deliberately creates a new session rather than
+// reviving the old record. The old record is the history of what already
+// happened, including how it ended; rewriting it to look alive would destroy
+// the one durable account of that. The new session records the conversation it
+// was handed.
 func (a *app) runResume(args []string) error {
 	flags := a.newFlagSet("shepherd resume")
 	socket := flags.String("socket", defaultSocket(), "private tmux socket name")
@@ -65,11 +68,68 @@ func (a *app) runResume(args []string) error {
 			"id": resumed.ID, "runner": resumed.Backend, "state": cliStatus(resumed),
 			"resumed_from": session.ID, "conversation_id": conversation.ID,
 			"conversation_source": conversation.Source,
+			"continued_existing":  resumed.ContinuedExisting,
 			"workstream_id":       resumed.WorkstreamID, "runtime_name": name, "root": resumed.Root,
 		})
 	}
+	if resumed.ContinuedExisting {
+		fmt.Fprintf(a.out, "sent to live %s owner %s for conversation %s (%s)\n",
+			resumed.Backend, format.ShortID(resumed.ID), format.ShortID(conversation.ID), name)
+		return nil
+	}
 	fmt.Fprintf(a.out, "resumed %s conversation %s as %s (%s)\n",
 		resumed.Backend, format.ShortID(conversation.ID), format.ShortID(resumed.ID), name)
+	return nil
+}
+
+// runFork explicitly branches a Codex conversation into a new native identity.
+// It is separate from resume so users never create a second writer by accident.
+func (a *app) runFork(args []string) error {
+	flags := a.newFlagSet("shepherd fork")
+	socket := flags.String("socket", defaultSocket(), "private tmux socket name")
+	jsonOutput := flags.Bool("json", false, "write a machine-readable result")
+	if err := parseAnywhere(flags, args); err != nil {
+		return err
+	}
+	if flags.NArg() < 2 {
+		return errors.New("usage: shepherd fork <session-id> <message>; put -- before a message that starts with a dash")
+	}
+	controller, err := a.dial(*socket)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), organizeTimeout)
+	defer cancel()
+	session, err := controller.Find(ctx, flags.Arg(0))
+	if err != nil {
+		return err
+	}
+	if !session.Durable {
+		return fmt.Errorf("session %s has no durable record, so Shepherd never registered its conversation",
+			format.ShortID(session.ID))
+	}
+	prompt := strings.Join(flags.Args()[1:], " ")
+	forked, err := controller.ForkSession(ctx, session.ID, prompt)
+	if err != nil {
+		return err
+	}
+	source, err := controller.RegisterConversation(ctx, session.ID)
+	if err != nil {
+		return err
+	}
+	name := "shepherd-" + forked.ID
+	if forked.Runtime != nil {
+		name = forked.Runtime.Name
+	}
+	if *jsonOutput {
+		return writeJSON(a.out, map[string]any{
+			"id": forked.ID, "runner": forked.Backend, "state": cliStatus(forked),
+			"forked_from": session.ID, "source_conversation_id": source.ID,
+			"workstream_id": forked.WorkstreamID, "runtime_name": name, "root": forked.Root,
+		})
+	}
+	fmt.Fprintf(a.out, "forked %s conversation %s as %s (%s)\n",
+		forked.Backend, format.ShortID(source.ID), format.ShortID(forked.ID), name)
 	return nil
 }
 

@@ -1,14 +1,15 @@
 # Session status, titles, and recency
 
-Status: durable titles shipped in V0.3.4. Semantic agent status and returned/seen
-attention state remain deferred until authoritative runner observations exist.
+Status: durable titles, optional ephemeral automatic titles, and authoritative
+native status are shipped. Returned/seen attention state remains deferred until
+stable completed-turn identities are part of the projection.
 
-Current implementation: state schema v2 stores an optional user-owned session
-title. Rows render a **brief** whose lead is that title, falling back to the
-initial prompt, and whose detail is a bounded runtime preview of the latest user
-message successfully sent through Shepherd. This is intentionally not durable chat
-history; direct native-TUI input remains unknowable. The durable
-`SessionActivity` design below is still deferred.
+Current implementation: state schema v3 stores an optional user-owned session
+title. Rows render a **brief** whose lead is that title, then an opted-in
+process-local automatic title, falling back to the initial prompt. Its detail
+prefers bounded runner-published native status, then transcript activity and the
+latest user message successfully sent through Shepherd. Native status and
+automatic titles never enter `state.json`.
 
 The brief's source interface is where the observer below reaches the screen: a
 `BriefSource` reads a cache and never blocks, so an observer that owns its own
@@ -16,16 +17,11 @@ cadence can fill either slot without the row learning about it. See the brief
 section of `docs/DESIGN.md`, and `todos/brief-sources.md` for the configurable
 and external sources that remain unbuilt.
 
-Step 3 below is now done, and its answer is in
-[runner-activity.md](runner-activity.md). The short version: Claude Code writes
-`~/.claude/sessions/<pid>.json` keyed by the session id Shepherd minted, carrying
-`status` ∈ `busy`/`shell`/`idle`/`waiting` written on every transition, plus a
-`waitingFor` phrase — `input needed`, `sandbox request`, `dialog open`. That is
-the signal steps 4 and 5 were waiting for. Codex has no equivalent and no
-externally supplied session id, so it remains unsupported. A transcript-backed
-`activity` source now fills the brief's detail slot, but nothing from it may
-enter the status column: it reads the most recent record, and this column is a
-claim about now.
+The shipped signal is fixed at launch. Claude receives a session-local status
+line plus lifecycle hooks; Codex receives a session-local terminal-title layout.
+Tmux metadata projects it into `Session.NativeStatus`, with a marker required
+before Codex pane titles are trusted. Transcript activity remains only a
+fallback and never becomes current native status.
 
 ## Product goal
 
@@ -129,9 +125,9 @@ A dashboard row should prioritize attention state and the user-owned title:
               returned 42s ago
 ```
 
-Use the explicit title when present; otherwise derive a one-line display label
-from the initial prompt without persisting an automatic title. At narrow widths,
-keep status and title before runner details or the message preview.
+Use the explicit title when present; otherwise use the optional process-local
+automatic title, then the initial prompt. At narrow widths, keep status and
+title before runner details or the message preview.
 
 The details pane should show title, agent state, runtime activity, latest via
 Shepherd, initial task, cwd, and the existing terminal preview.
@@ -150,20 +146,15 @@ The title slice did not add this table. The retained tmux preview already
 provides the cheap latest-message shim; durable recency and acknowledgement can
 wait until their lifecycle is needed.
 
-## Slice B · real agent status
+## Slice B · real agent status — shipped
 
-The retained-pane prerequisite shipped in V0.3.4: an empty
-`pane_dead_status` now projects as dead with an unknown outcome, never exit code
-zero, and does not produce a durable `OutcomeExited` record. That removes a
-false-success signal but does not provide semantic agent status.
+The retained-pane prerequisite still applies: process outcome and native status
+remain separate. The implemented status source is runner-owned and ephemeral.
+Claude publishes metrics and lifecycle edges through session-local settings;
+Codex publishes its documented terminal-title fields. Inputs are sanitized,
+single-line and capped at 240 runes, and old sessions are never rewritten.
 
-Next, run a focused signal probe. Claude exposes session listings and hooks;
-Codex app-server schemas expose turn and input state, but independently launched
-native TUIs are not automatically attached to that server. Prove inheritance,
-freshness, direct-TUI coverage, and stable completion identity before choosing
-a source.
-
-### Observer seam
+### Deferred richer observer seam
 
 Real turn status must come from reliable Claude- or Codex-specific signals, not
 terminal scraping heuristics. Keep the observer above `Supervisor` and make it
@@ -181,10 +172,10 @@ type AgentObservation struct {
 }
 ```
 
-A backend-selected `AgentObserver.Observe` returns observations for session
-references. The controller projection combines those with runtime and durable
-presentation metadata. Current observations live outside `SessionRecord` and
-`Supervisor` remains unaware of semantic agent state.
+A future backend-selected `AgentObserver.Observe` could return observations for
+session references. The controller projection would combine those with runtime
+and durable presentation metadata. The shipped native status intentionally does
+not claim stable turn IDs or returned/seen state.
 `CompletedTurnID` is the stable token used to determine whether a return is
 unread.
 
@@ -198,14 +189,14 @@ that its turn-start, turn-complete, and input-request signals are reliable.
    rows/details, and downgrade/invalid-state tests.
 2. [x] Represent dead panes with unknown outcomes honestly and stop persisting
    guessed success.
-3. [x] Probe authoritative Claude and Codex signals in fixtures or opt-in smoke
-   tests. Done in [runner-activity.md](runner-activity.md); Claude's
-   per-process session file is the source steps 4 and 5 should use.
-4. [ ] Add the observer interface with only `working`, `ready`, and `unknown`
-   beside the first reliable runner integration. Terminal outcomes always win.
-5. [ ] Add `needs_input` only after its signal is proven.
+3. [x] Probe authoritative Claude and Codex signals and choose launch-time
+   publishers rather than transcript or terminal inference.
+4. [x] Project runner-published `Ready`, `Working`, `Error`, and `Done` status
+   separately from terminal outcomes.
+5. [x] Add `Needs input` from explicit Claude permission, elicitation, and
+   input-request hook events.
 6. [ ] Add durable `returned`/`seen` acknowledgement only when a backend
    supplies stable completed-turn IDs.
 
-The shipped title slice provides useful organization now. Semantic labels and
-the `returned` badge remain deferred until Shepherd has sources it can trust.
+Native labels and both title forms are shipped. The `returned` badge remains
+deferred until Shepherd has stable completion identities it can trust.

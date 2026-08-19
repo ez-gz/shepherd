@@ -25,6 +25,10 @@ type Config struct {
 	Commands      map[string][]string `json:"commands"`
 	ComposerKeys  ComposerKeys        `json:"composer_keys"`
 	Brief         BriefConfig         `json:"brief"`
+	// AutomaticTitle opts the dashboard into one asynchronous GPT-5.6 Luna
+	// call after a session's first completed turn. Generated titles are never
+	// persisted, and the feature stays inert without OPENAI_API_KEY.
+	AutomaticTitle bool `json:"automatic_title"`
 }
 
 // BriefConfig chooses what fills the one-line summary in a session row. Each
@@ -58,7 +62,7 @@ type BriefSourceConfig struct {
 // internal/brief asserts in a test that its own source identifiers match this
 // list, so a rename cannot leave configuration accepting a name that no longer
 // renders anything.
-var BuiltinBriefSources = []string{"title", "prompt", "latest", "activity", "runner"}
+var BuiltinBriefSources = []string{"title", "automatic-title", "prompt", "latest", "status", "activity", "runner"}
 
 const (
 	defaultBriefIntervalSeconds = 10
@@ -68,18 +72,18 @@ const (
 	maxBriefSourceNameLength    = 32
 )
 
-// defaultBrief puts the runner's activity ahead of the latest message in the
-// detail slot. A row's lead already answers "which session is this?"; the
-// detail is the only cell that can answer "and what is it doing?", and the
-// latest message answers the first question a second time.
+// defaultBrief puts direct native status, then runner activity, ahead of the
+// latest message in the detail slot. A row's lead already answers "which
+// session is this?"; the detail is the only cell that can answer "and what is
+// it doing?", and the latest message answers the first question a second time.
 //
 // The order also decides what a user pays for. The activity source reads a file
 // on a timer, so naming it is what turns that on; a layout without it costs
 // nothing, and removing it from detail is how a user opts out.
 func defaultBrief() BriefConfig {
 	return BriefConfig{
-		Lead:   []string{"title", "prompt", "runner"},
-		Detail: []string{"activity", "latest", "prompt"},
+		Lead:   []string{"title", "automatic-title", "prompt", "runner"},
+		Detail: []string{"status", "activity", "latest", "prompt"},
 	}
 }
 
@@ -144,10 +148,11 @@ func (s Store) Load() (Config, error) {
 	}
 
 	var disk struct {
-		DefaultRunner string              `json:"default_runner"`
-		Commands      map[string][]string `json:"commands"`
-		ComposerKeys  json.RawMessage     `json:"composer_keys"`
-		Brief         json.RawMessage     `json:"brief"`
+		DefaultRunner  string              `json:"default_runner"`
+		Commands       map[string][]string `json:"commands"`
+		ComposerKeys   json.RawMessage     `json:"composer_keys"`
+		Brief          json.RawMessage     `json:"brief"`
+		AutomaticTitle *bool               `json:"automatic_title"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
@@ -194,6 +199,9 @@ func (s Store) Load() (Config, error) {
 		if err := brief.apply(&settings.Brief); err != nil {
 			return Config{}, fmt.Errorf("parse settings %q: brief: %w", s.Path, err)
 		}
+	}
+	if disk.AutomaticTitle != nil {
+		settings.AutomaticTitle = *disk.AutomaticTitle
 	}
 	return applyEnvironment(settings)
 }

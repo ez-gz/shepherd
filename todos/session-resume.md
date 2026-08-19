@@ -1,7 +1,8 @@
 # Session resume
 
 Status: shipped. Sessions register their native runner conversation
-automatically, and `shepherd resume` continues it in a new session.
+automatically. Codex resume reuses a sole live owner, starts a native resume only
+when unowned, refuses duplicate owners, and exposes branching as `shepherd fork`.
 
 ## The problem
 
@@ -46,8 +47,9 @@ schema-only and back-fills nothing, deliberately — see `docs/DESIGN.md`.
   a start time inside the match window, and the **verbatim initial prompt**.
   Exactly one match or nothing. `observed`.
 - `shepherd conversation ID` reports the id and its source. `shepherd resume ID MESSAGE`
-  starts a new session continuing that conversation; the original record is
-  untouched.
+  sends to the sole live Codex owner or starts a new session when the
+  conversation is unowned. `shepherd fork ID MESSAGE` explicitly creates a new
+  Codex branch.
 
 The registration is also what anything **reading** a runner's files has to ask
 for. A resumed session's records are filed under the conversation it continued,
@@ -89,11 +91,14 @@ directory and prompt are — and a cold start on a loaded machine is slow.
   so a scan there would mostly find nothing and would either race or block the
   launch. Matching is anchored to the durable creation time, so asking later
   returns the same answer.
-- **No reviving the old record.** Resume starts a new session. The old record is
-  the durable account of what happened, including how it ended, and rewriting it
-  to look alive would destroy the only copy of that.
+- **No reviving the old record.** An unowned resume starts a new session. The old
+  record is the durable account of what happened, including how it ended, and
+  rewriting it to look alive would destroy the only copy of that. A live Codex
+  owner is messaged in place instead.
 - **No caller-supplied id.** The typed action carries neither an id nor a
   provenance, so no surface can assert an unverified conversation as fact.
+- **No lock-file surgery.** Shepherd observes its durable registrations and tmux
+  runtimes; it never removes or rewrites Codex's own lock files.
 
 ## Next
 

@@ -29,15 +29,31 @@ import (
 	learnshepherd "github.com/ez-gz/shepherd/skills/learn-shepherd"
 )
 
-var version = "0.7.5"
+var version = "0.7.9"
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "__statusline" {
+		// Instrumentation is observational and must never break the runner that
+		// invoked it. Malformed input or a disappearing pane therefore produces
+		// no output and exits successfully.
+		if len(os.Args) == 3 && os.Args[2] == "claude" {
+			if update, err := runner.ReadClaudeStatus(os.Stdin); err == nil {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				_ = supervisor.PublishNativeStatus(ctx, update)
+				cancel()
+				if update.Display != "" {
+					fmt.Fprintln(os.Stdout, update.Display)
+				}
+			}
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "__agent" {
-		if len(os.Args) != 7 {
+		if len(os.Args) != 8 {
 			fmt.Fprintln(os.Stderr, "shepherd: invalid internal runner invocation")
 			os.Exit(2)
 		}
-		if err := runner.ExecEncoded(os.Args[2], os.Args[3], os.Args[4], os.Args[5], os.Args[6]); err != nil {
+		if err := runner.ExecEncoded(os.Args[2], os.Args[3], os.Args[4], os.Args[5], os.Args[6], os.Args[7]); err != nil {
 			fmt.Fprintln(os.Stderr, "shepherd:", err)
 			os.Exit(127)
 		}
@@ -127,6 +143,8 @@ func (a *app) run(args []string) error {
 		return a.runHistory(args[1:])
 	case "resume":
 		return a.runResume(args[1:])
+	case "fork":
+		return a.runFork(args[1:])
 	case "conversation":
 		return a.runConversation(args[1:])
 	case "ws", "workstream":
@@ -613,7 +631,8 @@ Usage:
   shepherd peek ID [--lines N]                print the pane's current frame
   shepherd history ID [--last N] [--json]     print what the runner recorded happened
   shepherd conversation ID [--json]           print the runner conversation id Shepherd registered
-  shepherd resume [--json] ID MESSAGE         continue that conversation in a new session
+  shepherd resume [--json] ID MESSAGE         send to its live Codex owner, or resume when unowned
+  shepherd fork [--json] ID MESSAGE           explicitly branch a Codex conversation
   shepherd stop ID                            stop runtime; keep the durable record
   shepherd doctor                             check local dependencies
 
@@ -813,6 +832,7 @@ type cliSessionJSON struct {
 	ExitCode          *int             `json:"exit_code"`
 	RuntimeSeconds    int64            `json:"runtime_seconds"`
 	LastActivityAt    *time.Time       `json:"last_activity_at,omitempty"`
+	NativeStatus      string           `json:"native_status,omitempty"`
 }
 
 func newCLISnapshot(snapshot control.Snapshot) cliSnapshotJSON {
@@ -844,6 +864,10 @@ func newCLISnapshot(snapshot control.Snapshot) cliSnapshotJSON {
 			value := observed
 			lastActivityAt = &value
 		}
+		nativeStatus := ""
+		if session.Runtime != nil {
+			nativeStatus = session.Runtime.NativeStatus
+		}
 		result.Sessions = append(result.Sessions, cliSessionJSON{
 			ID: session.ID, Runner: session.Backend, State: string(session.Status),
 			Title: title, DisplayTitle: displayTitle, InitialPrompt: session.Prompt,
@@ -852,6 +876,7 @@ func newCLISnapshot(snapshot control.Snapshot) cliSnapshotJSON {
 			Root: session.Root, Available: session.Available(), Alive: session.Alive(), Orphaned: session.Orphaned,
 			ExitCode: exitCode, RuntimeSeconds: int64(session.RuntimeDuration(time.Now()).Seconds()),
 			LastActivityAt: lastActivityAt,
+			NativeStatus:   nativeStatus,
 		})
 	}
 	return result

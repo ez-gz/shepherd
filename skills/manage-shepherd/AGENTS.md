@@ -25,10 +25,11 @@ states, and exit codes. Do not act on remembered state from earlier in the
 conversation; the user has a dashboard open and may have changed things.
 
 **3. Report only what Shepherd can prove.** Shepherd observes process truth from
-tmux: `live`, `exited`, `stopped`, `start_failed`, `unavailable`. It cannot see
-whether an agent is thinking, idle, blocked, or waiting for input. Never say a
-session is "working", "ready", "stuck", or "needs input". Say what the state
-enum says, plus activity timestamps if useful.
+tmux: `live`, `exited`, `stopped`, `start_failed`, `unavailable`. A session may
+also expose `native_status`, which is bounded ephemeral data published by the
+runner. You may report that line as native status. When it is absent, never
+infer "working", "ready", "stuck", or "needs input" from terminal text; say
+what the state enum says, plus activity timestamps if useful.
 
 **4. Confirm before starting or stopping any process.** `shepherd spawn`
 launches a real coding agent into a real repository, and it will edit files
@@ -114,10 +115,12 @@ narrate the frame as if it were history.
 
 **Picking work back up** goes through `shepherd resume <session> <message>`. A tmux
 pane dying does not end the runner's conversation, and Shepherd registers that
-conversation's id per session so it can be continued rather than restarted. The
-resume starts a *new* session; the old record stays as the account of what
-already happened. Confirm with the user before running it — it launches a
-session and sends it a message.
+conversation's id per session so it can be continued rather than restarted.
+For Codex, a sole live owner receives the message in its existing pane; only an
+unowned conversation launches `codex resume`, and multiple live owners are
+refused. `shepherd fork` is the explicit way to branch into a new Codex native
+identity. Confirm with the user before either verb — both send a message and
+fork always launches a process. Never delete Codex's lock files.
 
 `shepherd conversation <session>` reports the id and, just as importantly, its source:
 

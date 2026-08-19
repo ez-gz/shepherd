@@ -155,28 +155,32 @@ Every full-screen surface carries an unmistakable mode badge: **Dashboard**,
 view of its own.
 
 Each session row carries a **brief**: the durable user title when one is set,
-otherwise a one-line initial task, followed after `↳` by what the session is
-doing. The two halves get separate width budgets, so a long title cannot crowd
-the second out and a narrow row drops it rather than showing a fragment of it.
-Rows omit the label that names the field — twenty columns the text itself can
-use — and the details pane below still spells it out.
+then an optional ephemeral automatic title, otherwise a one-line initial task,
+followed after `↳` by what the session is doing. The two halves get separate
+width budgets, so a long title cannot crowd the second out and a narrow row
+drops it rather than showing a fragment of it. Rows omit the label that names
+the field — twenty columns the text itself can use — and the details pane below
+still spells it out.
 
 That second half is a real status line, not a restatement of what you typed:
 
 ```text
-● claude  a1b2c3  live   Fix flaky OAuth tests  ↳ ~running make check
-● claude  d4e5f6  live   Release the Linux build ↳ ~editing packaging.go
-● codex   9a8b7c  live   Rewrite the retry loop  ↳ also check the timeout
+● claude  a1b2c3  live   Fix flaky OAuth tests   ↳ Working · Opus · high · 18% ctx
+● codex   d4e5f6  live   Release the Linux build ↳ Working · gpt-5.6-codex · 42% ctx
+● claude  9a8b7c  live   Rewrite the retry loop  ↳ ~editing retry.go
 ```
 
-Shepherd reads it from the transcript Claude Code writes for the session it
-launched — the last tool call, or the first line of a finished reply. The `~` is
-not decoration: the phrase is derived from another program's records, so it is
-marked as something Shepherd was told rather than saw. Codex writes an equivalent
-record but mints its own session id, so Shepherd cannot tell which file belongs to
-which session; those rows fall through to the latest message sent through
-Shepherd, as before. Text entered directly in an attached native terminal is not
-observable either way.
+For sessions launched by this version, the runner publishes a bounded native
+status. Claude receives a session-local status line and lifecycle hooks; Codex
+receives a session-local terminal-title layout. Shepherd projects that data
+through tmux without writing it to `state.json` or inferring it from terminal
+text. Older live sessions keep the launch contract they started with and fall
+through to transcript activity or the latest message sent through Shepherd.
+
+The `~` is not decoration: transcript activity is a phrase derived from another
+program's records, so it is marked as something Shepherd was told rather than
+directly observed. Text entered directly in an attached native terminal remains
+outside Shepherd's message history.
 
 Which sources fill a brief is a single ordered layout you can change in
 settings, so a row can show only your title, or drop the activity line, or carry
@@ -223,6 +227,7 @@ shepherd peek a1b2c3
 shepherd history a1b2c3 --last 10
 shepherd conversation a1b2c3
 shepherd resume a1b2c3 "Pick this back up and finish the retry work"
+shepherd fork a1b2c3 "Try the alternate design in a new Codex branch"
 shepherd ws archive "Public API" --yes
 shepherd delete a1b2c3 --yes
 ```
@@ -233,11 +238,11 @@ after positional arguments. `shepherd ws archive` and `shepherd delete` require 
 `--yes`.
 
 `shepherd list --json` returns a machine-readable projection of workstreams and
-sessions, including durable/display titles, latest-via-Shepherd text, runtime
-availability, a stable process-state enum, and an `exit_code` that is `null`
-when tmux cannot prove the outcome. Every command above accepts `--json` and
-returns a machine-readable result. These are local human CLI surfaces; they do
-not enable manager authority.
+sessions, including durable/display titles, latest-via-Shepherd text, bounded
+`native_status`, runtime availability, a stable process-state enum, and an
+`exit_code` that is `null` when tmux cannot prove the outcome. Every command
+above accepts `--json` and returns a machine-readable result. These are local
+human CLI surfaces; they do not enable manager authority.
 
 ## Resuming a conversation
 
@@ -251,9 +256,19 @@ shepherd conversation a1b2c3    # the runner conversation id, and how Shepherd k
 shepherd resume a1b2c3 "Pick this back up and finish the retry work"
 ```
 
-Resuming starts a *new* session that continues the old conversation. The
-original record is left exactly as it was, because it is the durable account of
-what already happened, including how it ended.
+For Codex, resume enforces one live writer per native conversation. If a live
+Shepherd session already owns it, the message is sent to that pane. If it is
+unowned, Shepherd starts `codex resume` in a new durable session. Multiple live
+owners are refused rather than compounded. Creating a branch is a separate,
+explicit operation:
+
+```sh
+shepherd fork a1b2c3 "Try the alternate design"
+```
+
+The unowned resume path leaves the original record exactly as it was, because
+it is the durable account of what already happened. Shepherd never removes or
+rewrites Codex's own lock files.
 
 How the id is known differs by runner, and Shepherd reports which case it is
 rather than presenting them as the same fact:
@@ -490,8 +505,10 @@ The built-in sources are:
 | Source | What fills it |
 | --- | --- |
 | `title` | the durable title you gave the session |
+| `automatic-title` | an ephemeral GPT-5.6 Luna title when explicitly enabled |
 | `prompt` | the immutable task it was launched with |
 | `latest` | the most recent message sent through Shepherd |
+| `status` | bounded status published directly by the native runner |
 | `activity` | what the runner last recorded the session doing |
 | `runner` | `claude session`, as a last resort |
 
@@ -521,9 +538,9 @@ Shepherd runs:
 {
   "brief": {
     "lead": ["title", "prompt", "runner"],
-    "detail": ["status", "activity", "latest"],
+    "detail": ["ci-status", "status", "activity", "latest"],
     "sources": {
-      "status": {
+      "ci-status": {
         "command": ["agent-status", "--porcelain"],
         "interval_seconds": 5,
         "timeout_seconds": 2
@@ -532,6 +549,22 @@ Shepherd runs:
   }
 }
 ```
+
+### Optional automatic titles
+
+Automatic titles are off by default. Opt in with the top-level setting:
+
+```json
+{
+  "automatic_title": true
+}
+```
+
+When `OPENAI_API_KEY` is present, the dashboard sends the first completed-turn
+output once to `gpt-5.6-luna` and keeps the short result in memory. It never
+rewrites the durable session title, and a title you set always wins. Without the
+key, no transcript is read and no API call is attempted. The settings screen
+shows whether the feature is active.
 
 The command is argv, not a shell string. It runs once per session, is told
 which session through `SHEPHERD_SESSION_ID`, `SHEPHERD_SESSION_RUNNER`,
@@ -577,13 +610,13 @@ The dashboard also accepts `--runner`, `--root` / `-C`, and `--socket`.
 
 An interactive agent process stays alive while it is thinking, waiting for
 input, or simply sitting at its prompt. Tmux cannot distinguish those semantic
-states. Shepherd therefore reports process truth only: `live`, `attached`,
-`exited`, or `failed`, plus runtime, path, terminal activity, output preview,
-and an exit code when tmux supplies one. Some retained dead panes—especially on
-older tmux versions—omit `pane_dead_status`; Shepherd reports their process as
-exited with an unknown outcome and never guesses zero or persists a successful
-exit. It does not invent “completed” or “needs input” states, nor does it guess
-token usage.
+states. Shepherd reports process truth as `live`, `attached`, `exited`, or
+`failed`, plus runtime, path, terminal activity, output preview, and an exit code
+when tmux supplies one. New agent sessions may also carry a separate bounded
+native status published by Claude or Codex; Shepherd never derives that status
+from terminal text. Some retained dead panes—especially on older tmux
+versions—omit `pane_dead_status`; Shepherd reports their process as exited with
+an unknown outcome and never guesses zero or persists a successful exit.
 
 Workstreams are organization, not autonomy. Shepherd has no manager role,
 coordination grants, approvals, parent-child sessions, task graph, automatic

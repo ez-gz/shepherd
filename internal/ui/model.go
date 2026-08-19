@@ -171,6 +171,13 @@ type Model struct {
 	briefReport       brief.Report
 	briefFetch        briefFetchState
 
+	automaticTitles        map[string]string
+	automaticTitleTried    map[string]bool
+	automaticTitleScanned  map[string]time.Time
+	automaticTitleActive   string
+	automaticTitleFailure  string
+	generateAutomaticTitle automaticTitleFunc
+
 	input          []string
 	inputCursor    int
 	inputColumn    int
@@ -223,6 +230,8 @@ func New(controller control.Service, root string, backend shepherd.Backend, stor
 	return Model{
 		controller: controller, root: root, backend: backend, store: store, settings: settings,
 		overview: newOverviewModel(control.Snapshot{}), collapsed: make(map[string]bool), rootIndex: make(map[string]int),
+		automaticTitles: make(map[string]string), automaticTitleTried: make(map[string]bool),
+		automaticTitleScanned: make(map[string]time.Time), generateAutomaticTitle: defaultAutomaticTitle,
 		now: time.Now,
 	}
 }
@@ -350,7 +359,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.requestSnapshot()
 
 	case tickMsg:
-		return m, tea.Batch(m.requestSnapshot(), m.requestBrief(), tickCmd())
+		return m, tea.Batch(m.requestSnapshot(), m.requestBrief(), m.requestAutomaticTitle(), tickCmd())
 
 	case briefMsg:
 		accepted, queued := m.finishBrief(message.generation)
@@ -400,11 +409,30 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.restoreSelection()
 		if selected, ok := m.selectedSession(); ok && selected.Available() {
-			return m, tea.Batch(queuedSnapshot, m.requestPreview(selected.ID), m.artifactContextCmd(false))
+			return m, tea.Batch(queuedSnapshot, m.requestPreview(selected.ID), m.artifactContextCmd(false), m.requestAutomaticTitle())
 		}
 		m.previewFetch.queuedID = ""
 		m.preview, m.previewID = "", ""
-		return m, tea.Batch(queuedSnapshot, m.artifactContextCmd(false))
+		return m, tea.Batch(queuedSnapshot, m.artifactContextCmd(false), m.requestAutomaticTitle())
+
+	case automaticTitleMsg:
+		if message.id == "" || message.id != m.automaticTitleActive {
+			return m, nil
+		}
+		m.automaticTitleActive = ""
+		if message.err != nil {
+			m.automaticTitleFailure = message.err.Error()
+		}
+		if message.outputFound {
+			m.automaticTitleTried[message.id] = true
+			if message.err == nil && message.title != "" {
+				m.automaticTitles[message.id] = message.title
+				m.automaticTitleFailure = ""
+			}
+		} else {
+			m.automaticTitleScanned[message.id] = m.clock()
+		}
+		return m, m.requestAutomaticTitle()
 
 	case previewMsg:
 		accepted, queuedID := m.finishPreview(message.generation, message.id)
@@ -510,6 +538,10 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		// rather than allowed to land afterwards and repopulate them.
 		m.briefObservations, m.briefReport = nil, brief.Report{}
 		m.briefFetch.activeGeneration, m.briefFetch.queued = 0, false
+		if !m.settings.AutomaticTitle {
+			m.automaticTitleActive = ""
+			m.automaticTitleFailure = ""
+		}
 		m.errorText = ""
 		m.notice = "settings reloaded · brief applies now, commands to new sessions"
 		return m, nil
@@ -1946,6 +1978,7 @@ func (m Model) settingsLines() []string {
 		mutedStyle.Render(" state    ") + state,
 		mutedStyle.Render(" app data ") + truncatePlain(format.OneLine(format.CompactPath(m.snapshot.StatePath)), max(1, m.width-10)),
 		mutedStyle.Render(" startup default  ") + backendStyle(m.settings.DefaultRunner).Render(string(m.settings.DefaultRunner)),
+		m.automaticTitleSettingsLine(),
 		"", lipgloss.NewStyle().Bold(true).Render(" composer keys"),
 		mutedStyle.Render(" commit ") + "Enter sends to the destination shown in the composer",
 		mutedStyle.Render(" empty  ") + helpKeyLabel(m.settings.ReplyKey()) + " reply to selection",

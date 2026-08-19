@@ -203,6 +203,7 @@ func TestMachineSnapshotIncludesDurableTitleAndHonestUnknownExit(t *testing.T) {
 	runtime := shepherd.Session{
 		ID: id, Name: "shepherd-" + id, Backend: shepherd.BackendCodex,
 		Status: shepherd.StatusExited, ExitCode: nil, StartedAt: time.Now().Add(-time.Minute),
+		NativeStatus: "Done · gpt-5.6-codex · 42% ctx",
 	}
 	snapshot := control.Snapshot{
 		Revision:    9,
@@ -224,6 +225,9 @@ func TestMachineSnapshotIncludesDurableTitleAndHonestUnknownExit(t *testing.T) {
 	}
 	if session.ExitCode != nil || session.State != "exited" {
 		t.Fatalf("unknown exit projection = stable state %q code %#v", session.State, session.ExitCode)
+	}
+	if session.NativeStatus != runtime.NativeStatus {
+		t.Fatalf("native status = %q, want %q", session.NativeStatus, runtime.NativeStatus)
 	}
 
 	var output bytes.Buffer

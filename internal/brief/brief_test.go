@@ -100,14 +100,14 @@ func TestBuiltinSourcesAreProvenAndObservedSourcesAreNot(t *testing.T) {
 	}
 
 	settings := config.BriefConfig{
-		Lead:    []string{"status", "title"},
+		Lead:    []string{"agent-status", "title"},
 		Detail:  []string{"latest"},
-		Sources: map[string]config.BriefSourceConfig{"status": {Command: []string{"true"}, IntervalSeconds: 10, TimeoutSeconds: 3}},
+		Sources: map[string]config.BriefSourceConfig{"agent-status": {Command: []string{"true"}, IntervalSeconds: 10, TimeoutSeconds: 3}},
 	}
 	session := testSession("Fix OAuth", "investigate", "also the retry")
-	observations := Observations{{Session: session.ID, Source: "status"}: {Text: "waiting for input"}}
+	observations := Observations{{Session: session.ID, Source: "agent-status"}: {Text: "waiting for input"}}
 	observed := LayoutFrom(settings).Resolve(session, NewRegistry(settings, observations))
-	if observed.Lead.Source != "status" {
+	if observed.Lead.Source != "agent-status" {
 		t.Fatalf("configured source did not fill the lead: %+v", observed.Lead)
 	}
 	if observed.Lead.Proven {
@@ -119,8 +119,8 @@ func TestBuiltinSourcesAreProvenAndObservedSourcesAreNot(t *testing.T) {
 // an empty lead, or a dashboard shows blank rows until the first pass lands.
 func TestObservedSourceFallsThroughUntilItHasBeenObserved(t *testing.T) {
 	settings := config.BriefConfig{
-		Lead:    []string{"status", "title"},
-		Sources: map[string]config.BriefSourceConfig{"status": {Command: []string{"true"}, IntervalSeconds: 10, TimeoutSeconds: 3}},
+		Lead:    []string{"agent-status", "title"},
+		Sources: map[string]config.BriefSourceConfig{"agent-status": {Command: []string{"true"}, IntervalSeconds: 10, TimeoutSeconds: 3}},
 	}
 	session := testSession("Fix OAuth", "investigate", "")
 	item := LayoutFrom(settings).Resolve(session, NewRegistry(settings, nil))
@@ -150,7 +150,7 @@ func TestFragmentLabelsNameTheSource(t *testing.T) {
 		SourcePrompt: "initial task",
 		SourceTitle:  "title",
 		SourceRunner: "runner",
-		"status":     "status",
+		SourceStatus: "native status",
 	} {
 		if got := (Fragment{Source: id}).Label(); got != want {
 			t.Fatalf("label for %q = %q, want %q", id, got, want)

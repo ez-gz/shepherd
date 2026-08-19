@@ -14,6 +14,7 @@ import (
 	"github.com/ez-gz/shepherd/internal/config"
 	"github.com/ez-gz/shepherd/internal/control"
 	"github.com/ez-gz/shepherd/internal/format"
+	"github.com/ez-gz/shepherd/internal/shepherd"
 )
 
 // SourceID names a source in configuration and in provenance.
@@ -22,6 +23,10 @@ type SourceID string
 const (
 	// SourceTitle is the durable title the user gave the session.
 	SourceTitle SourceID = "title"
+	// SourceAutomaticTitle is a model-generated, process-local label. It is
+	// intentionally unproven and follows the user-owned title in the default
+	// lead order so a human title always wins.
+	SourceAutomaticTitle SourceID = "automatic-title"
 	// SourcePrompt is the immutable task the session was launched with.
 	SourcePrompt SourceID = "prompt"
 	// SourceLatest is the most recent message routed through Shepherd. Text typed
@@ -35,6 +40,10 @@ const (
 	// renders with the approximate mark. Its text is filled by an Observer, and
 	// a session with nothing cached falls through to the next source.
 	SourceActivity SourceID = "activity"
+	// SourceStatus is the bounded status the native runner published through
+	// launch-time instrumentation. Unlike activity, it is a direct observation
+	// and therefore carries no approximation mark.
+	SourceStatus SourceID = "status"
 	// SourceRunner is the last-resort label for a session with no other text.
 	SourceRunner SourceID = "runner"
 )
@@ -43,6 +52,10 @@ const (
 type Fragment struct {
 	Text   string
 	Source SourceID
+	// Runner is set when presentation follows the native runner identity. The
+	// UI uses it to color a proven native status without teaching this package
+	// about terminal styles.
+	Runner shepherd.Backend
 	// Proven marks text Shepherd can defend from durable state or a tmux
 	// observation. A source that derives, summarizes, guesses, or asks another
 	// program must leave it false, and the row then marks the text approximate.
@@ -68,8 +81,12 @@ func (id SourceID) Label() string {
 		return "initial task"
 	case SourceTitle:
 		return "title"
+	case SourceAutomaticTitle:
+		return "automatic title"
 	case SourceActivity:
 		return "runner activity"
+	case SourceStatus:
+		return "native status"
 	case SourceRunner:
 		return "runner"
 	default:
@@ -107,13 +124,18 @@ type Registry map[SourceID]Source
 type sourceFunc struct {
 	id     SourceID
 	proven bool
+	runner bool
 	text   func(control.Session) string
 }
 
 func (s sourceFunc) ID() SourceID { return s.id }
 
 func (s sourceFunc) Fragment(session control.Session) Fragment {
-	return Fragment{Text: briefText(s.text(session)), Source: s.id, Proven: s.proven}
+	fragment := Fragment{Text: briefText(s.text(session)), Source: s.id, Proven: s.proven}
+	if s.runner {
+		fragment.Runner = session.Backend
+	}
+	return fragment
 }
 
 // observedSource reads whatever an Observer last recorded. It never runs
@@ -160,12 +182,21 @@ func NewRegistry(settings config.BriefConfig, observations Observations) Registr
 	registry := Registry{
 		SourceTitle: sourceFunc{id: SourceTitle, proven: true,
 			text: func(session control.Session) string { return session.Record.Title }},
+		SourceAutomaticTitle: sourceFunc{id: SourceAutomaticTitle,
+			text: func(session control.Session) string { return session.AutomaticTitle }},
 		SourcePrompt: sourceFunc{id: SourcePrompt, proven: true,
 			text: func(session control.Session) string { return session.Prompt }},
 		SourceLatest: sourceFunc{id: SourceLatest, proven: true,
 			text: func(session control.Session) string { return session.LastUserMessage }},
 		SourceRunner: sourceFunc{id: SourceRunner, proven: true,
 			text: func(session control.Session) string { return string(session.Backend) + " session" }},
+		SourceStatus: sourceFunc{id: SourceStatus, proven: true, runner: true,
+			text: func(session control.Session) string {
+				if session.Runtime == nil {
+					return ""
+				}
+				return session.Runtime.NativeStatus
+			}},
 		// The activity source reads the same cache a configured command does.
 		// That is the whole reason the cache exists: a render must not be the
 		// thing that opens a file, and a source with nothing cached must fall
@@ -174,6 +205,9 @@ func NewRegistry(settings config.BriefConfig, observations Observations) Registr
 	}
 	for name := range settings.Sources {
 		id := SourceID(name)
+		if _, builtin := registry[id]; builtin {
+			continue
+		}
 		registry[id] = observedSource{id: id, observations: observations}
 	}
 	return registry

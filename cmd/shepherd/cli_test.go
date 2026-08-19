@@ -132,6 +132,7 @@ func TestRefusalsNeverReachForAController(t *testing.T) {
 		{"peek takes exactly one session", []string{"peek"}, "usage: shepherd peek"},
 		{"history takes exactly one session", []string{"history"}, "usage: shepherd history"},
 		{"resume requires a message", []string{"resume", testSessionID}, "usage: shepherd resume"},
+		{"fork requires a message", []string{"fork", testSessionID}, "usage: shepherd fork"},
 		{"conversation takes exactly one session", []string{"conversation"}, "usage: shepherd conversation"},
 		{"history refuses a negative count", []string{"history", testSessionID, "--last", "-1"}, "cannot be negative"},
 		{"delete demands confirmation", []string{"delete", testSessionID}, "pass --yes to confirm"},
@@ -189,6 +190,7 @@ func TestFlagsAreAcceptedAfterPositionals(t *testing.T) {
 		{"peek", []string{"peek", testSessionID, "--lines", "10"}},
 		{"history", []string{"history", testSessionID, "--last", "5"}},
 		{"send", []string{"send", testSessionID, "carry on", "--json"}},
+		{"fork", []string{"fork", testSessionID, "branch here", "--json"}},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			h := newHarness(t)
@@ -235,6 +237,8 @@ func TestJSONResultsCarryTheKeysThePilotReads(t *testing.T) {
 			[]string{"session_id", "state", "capture", "capture_is_current_frame_only"}},
 		{"history", []string{"history", testSessionID, "--json"},
 			[]string{"session_id", "runner", "availability", "total_turns", "turns"}},
+		{"fork", []string{"fork", testSessionID, "branch here", "--json"},
+			[]string{"id", "runner", "state", "forked_from", "source_conversation_id"}},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			h := newHarness(t)
@@ -660,6 +664,54 @@ func TestResumeReportsTheConversationItContinuedAndTheSessionItMade(t *testing.T
 	}
 	if !strings.Contains(output, format.ShortID(resumedID)) {
 		t.Errorf("output = %q, want it to name the new session", output)
+	}
+}
+
+func TestResumeReportsWhenItSentToTheExistingCodexOwner(t *testing.T) {
+	h := newHarness(t)
+	h.service.FindFunc = func(context.Context, string) (control.Session, error) {
+		return control.Session{ID: testSessionID, Backend: shepherd.BackendCodex, Durable: true}, nil
+	}
+	h.service.ResumeSessionFunc = func(_ context.Context, _, prompt string) (control.Session, error) {
+		if prompt != "carry on" {
+			t.Fatalf("prompt = %q", prompt)
+		}
+		return control.Session{
+			ID: testSessionID, Backend: shepherd.BackendCodex, Status: control.StatusLive,
+			Durable: true, ContinuedExisting: true,
+			Record: workstream.SessionRecord{ID: testSessionID, Conversation: &workstream.Conversation{
+				ID: "019e6d0c-14bd-7792-91d2-f684a8dc6e80", Source: workstream.ConversationObserved,
+			}},
+		}, nil
+	}
+
+	if err := h.app.run([]string{"resume", testSessionID, "carry on"}); err != nil {
+		t.Fatal(err)
+	}
+	if output := h.out.String(); !strings.Contains(output, "sent to live codex owner") || strings.Contains(output, "resumed codex conversation") {
+		t.Fatalf("output = %q", output)
+	}
+}
+
+func TestForkCarriesTheSourceAndPromptToTheExplicitControllerAction(t *testing.T) {
+	h := newHarness(t)
+	const forkedID = "018f0000-0000-4000-8000-0000000000f4"
+	h.service.ForkSessionFunc = func(_ context.Context, id, prompt string) (control.Session, error) {
+		if id != testSessionID || prompt != "try the other parser" {
+			t.Fatalf("fork = id %q prompt %q", id, prompt)
+		}
+		return control.Session{ID: forkedID, Backend: shepherd.BackendCodex, Status: control.StatusLive, Durable: true}, nil
+	}
+	h.service.RegisterConversationFunc = func(context.Context, string) (workstream.Conversation, error) {
+		return workstream.Conversation{ID: "019e6d0c-14bd-7792-91d2-f684a8dc6e80", Source: workstream.ConversationObserved}, nil
+	}
+
+	if err := h.app.run([]string{"fork", testSessionID, "try", "the", "other", "parser"}); err != nil {
+		t.Fatal(err)
+	}
+	output := h.out.String()
+	if !strings.Contains(output, "forked codex conversation") || !strings.Contains(output, format.ShortID(forkedID)) {
+		t.Fatalf("output = %q", output)
 	}
 }
 

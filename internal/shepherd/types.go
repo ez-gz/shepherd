@@ -50,9 +50,8 @@ const (
 )
 
 // Session is the runner-neutral projection of one tmux-owned agent process and
-// its bounded tmux-scoped presentation metadata. Runtime fields contain process
-// truth only; semantic states such as "needs input" require a future
-// runner-specific observer.
+// its bounded tmux-scoped presentation metadata. Lifecycle fields contain
+// process truth only; NativeStatus is a separate runner-published observation.
 type Session struct {
 	ID      string
 	Name    string
@@ -62,13 +61,17 @@ type Session struct {
 	// LastUserMessage is a bounded preview of the most recent message routed
 	// through Shepherd. Messages typed in an attached native TUI are not observed.
 	LastUserMessage string
-	Root            string
-	CurrentPath     string
-	CurrentCommand  string
-	Status          Status
-	StartedAt       time.Time
-	EndedAt         time.Time
-	LastActivityAt  time.Time
+	// NativeStatus is bounded, ephemeral runner-published presentation data.
+	// It comes from launch-time instrumentation and is never inferred from the
+	// terminal or written to durable workstream state.
+	NativeStatus   string
+	Root           string
+	CurrentPath    string
+	CurrentCommand string
+	Status         Status
+	StartedAt      time.Time
+	EndedAt        time.Time
+	LastActivityAt time.Time
 	// ExitCode is nil when the runtime is live or when tmux retained a dead
 	// pane without reporting pane_dead_status. A non-nil zero is therefore a
 	// known successful exit, distinct from an unknown terminal status.
@@ -107,6 +110,9 @@ type StartRequest struct {
 	// rather than begin. Empty starts a fresh conversation. It travels as argv
 	// to the runner like every other launch value and is never interpolated.
 	Resume string
+	// Fork starts a new native conversation from Resume. It is explicit because
+	// resume means one continuing writer, while fork means a new branch.
+	Fork bool
 }
 
 // Supervisor is the deliberately small boundary between the dashboard and
