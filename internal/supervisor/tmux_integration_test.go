@@ -59,25 +59,25 @@ func TestBootstrapInstallsCopyFirstMouseContract(t *testing.T) {
 	assertTmuxValue([]string{"show-options", "-gv", "set-clipboard"}, "on")
 	assertTmuxValue([]string{"show-options", "-sv", "@shepherd_bootstrap_version"}, bootstrapVersion)
 
-	rootBinding, err := manager.run(ctx, nil, "list-keys", "-T", "root", "MouseDrag1Pane")
+	rootBinding, err := manager.keyBinding(ctx, "root", "MouseDrag1Pane")
 	if err != nil {
 		t.Fatal(err)
 	}
-	binding := strings.TrimSpace(string(rootBinding))
+	binding := strings.TrimSpace(rootBinding)
 	if !strings.Contains(binding, "copy-mode -M") || strings.Contains(binding, "mouse_any_flag") || strings.Contains(binding, "send-keys -M") {
 		t.Fatalf("MouseDrag1Pane retained provider-dependent routing: %q", binding)
 	}
 	for _, table := range []string{"copy-mode", "copy-mode-vi"} {
-		output, runErr := manager.run(ctx, nil, "list-keys", "-T", table, "MouseDragEnd1Pane")
-		if runErr != nil || !strings.Contains(string(output), "copy-pipe-and-cancel") {
+		output, runErr := manager.keyBinding(ctx, table, "MouseDragEnd1Pane")
+		if runErr != nil || !strings.Contains(output, "copy-pipe-and-cancel") {
 			t.Fatalf("%s drag end = %q, err=%v", table, output, runErr)
 		}
 		for key, command := range map[string]string{
 			"Space": "begin-selection",
 			"Enter": "copy-pipe-and-cancel",
 		} {
-			output, runErr = manager.run(ctx, nil, "list-keys", "-T", table, key)
-			if runErr != nil || !strings.Contains(string(output), command) {
+			output, runErr = manager.keyBinding(ctx, table, key)
+			if runErr != nil || !strings.Contains(output, command) {
 				t.Fatalf("%s %s = %q, err=%v, want %s", table, key, output, runErr, command)
 			}
 		}

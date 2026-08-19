@@ -97,12 +97,16 @@ func (t *Tmux) Inspect(ctx context.Context) (TmuxHealth, error) {
 		output, _ := t.run(ctx, nil, args...)
 		return format.OneLine(string(output))
 	}
+	readKey := func(table, key string) string {
+		binding, _ := t.keyBinding(ctx, table, key)
+		return format.OneLine(binding)
+	}
 	health.Bootstrap = read("show-options", "-sv", "@shepherd_bootstrap_version")
 	health.Mouse = read("show-options", "-gv", "mouse")
 	health.SetClipboard = read("show-options", "-gv", "set-clipboard")
 	health.CopyCommand = read("show-options", "-sv", "copy-command")
-	health.DragBinding = read("list-keys", "-T", "root", "MouseDrag1Pane")
-	health.CopyBinding = read("list-keys", "-T", "copy-mode", "MouseDragEnd1Pane")
+	health.DragBinding = readKey("root", "MouseDrag1Pane")
+	health.CopyBinding = readKey("copy-mode", "MouseDragEnd1Pane")
 	sessions, err := t.Sessions(ctx)
 	if err != nil {
 		return health, err
@@ -650,6 +654,34 @@ func (t *Tmux) run(ctx context.Context, input []byte, args ...string) ([]byte, e
 		return nil, fmt.Errorf("%s", message)
 	}
 	return stdout.Bytes(), nil
+}
+
+// keyBinding reads a single binding without asking tmux to filter to one key.
+// tmux 3.7 sends a one-result list-keys query to the target client's status
+// line instead of stdout, even for a command running without a client. Listing
+// the table and selecting its structured -T <table> <key> prefix works from the
+// minimum supported tmux 3.3 onward and keeps doctor output version-neutral.
+func (t *Tmux) keyBinding(ctx context.Context, table, key string) (string, error) {
+	output, err := t.run(ctx, nil, "list-keys", "-T", table)
+	if err != nil {
+		return "", err
+	}
+	if binding, ok := findTmuxKeyBinding(string(output), table, key); ok {
+		return binding, nil
+	}
+	return "", fmt.Errorf("tmux key %s is not bound in table %s", key, table)
+}
+
+func findTmuxKeyBinding(output, table, key string) (string, bool) {
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Fields(line)
+		for index := 0; index+2 < len(fields); index++ {
+			if fields[index] == "-T" && fields[index+1] == table && fields[index+2] == key {
+				return strings.TrimSpace(line), true
+			}
+		}
+	}
+	return "", false
 }
 
 func parseSession(fields []string) (shepherd.Session, error) {

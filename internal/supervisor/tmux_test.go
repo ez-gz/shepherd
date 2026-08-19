@@ -254,6 +254,21 @@ func TestNativeStatusPaneIDValidationIsStrict(t *testing.T) {
 	}
 }
 
+func TestFindTmuxKeyBindingHandlesVersionDependentPadding(t *testing.T) {
+	output := strings.Join([]string{
+		"bind-key -T root MouseDown1Pane select-pane -t =",
+		"bind-key  -T root MouseDrag1Pane            copy-mode -M",
+		"bind-key -T root F12 display-message MouseDrag1Pane",
+	}, "\n")
+	binding, ok := findTmuxKeyBinding(output, "root", "MouseDrag1Pane")
+	if !ok || binding != "bind-key  -T root MouseDrag1Pane            copy-mode -M" {
+		t.Fatalf("binding = %q, found=%t", binding, ok)
+	}
+	if binding, ok := findTmuxKeyBinding(output, "copy-mode", "MouseDrag1Pane"); ok || binding != "" {
+		t.Fatalf("wrong table binding = %q, found=%t", binding, ok)
+	}
+}
+
 func TestUserMessagePreviewIsBoundedAndSafe(t *testing.T) {
 	input := "  first\nsecond\t\x1b]52;c;c2VjcmV0\x07 " + strings.Repeat("界", 300)
 	got := userMessagePreview(input)
