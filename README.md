@@ -5,6 +5,11 @@ real Codex and Claude Code sessions inside a private tmux server, organizes them
 into durable workstreams, lets you send follow-ups, and hands your terminal
 directly to the native agent UI when you attach.
 
+You can operate Shepherd yourself or ask an LLM to operate it through the same
+guarded CLI. Shepherd packages an agent contract and command skill in its home
+directory so a native coding agent can organize workstreams and sessions,
+maintain notes and artifacts, and report state on your behalf.
+
 Tmux remains the runtime supervisor and the coding-agent CLIs remain the native
 runners. Shepherd adds a small durable organization layer without introducing a
 daemon, manager agent, task graph, or replacement execution engine.
@@ -30,6 +35,25 @@ daemon, manager agent, task graph, or replacement execution engine.
 - **Ungrouped** — durable sessions with no active workstream membership.
 - **Orphaned** — tmux panes carrying a Shepherd ID unknown to durable state; they
   are never silently adopted.
+
+## Topology
+
+A workstream is a logical bundle for an outcome, not a stage in a linear task
+graph:
+
+```text
+workstream: ship one feature
+├── roots: one or more repository directory routes
+├── sessions: development, tests, QA, PR feedback, or any other agent work
+│   └── runtime: the current tmux pane, when one still exists
+└── artifact_dir: notes.md, handoffs, checklists, and other shared files
+```
+
+Each session launches with one runner in exactly one registered root. Register
+multiple roots when one piece of work spans repositories—for example an API and
+its client—while keeping all of its sessions and durable context in one
+workstream. Codex and Claude command argv are configurable for compatible
+wrappers or variants; `no-agent` opens a plain shell.
 
 ## Install
 
@@ -82,10 +106,19 @@ one in an oversized launch prompt. After you detach, the dashboard keeps the
 directory where you invoked `shepherd quickstart` as the launch root for your
 first project workstream.
 
-The guide's first lesson is how to detach. Press `Ctrl-b`, release both keys,
-then press `d`; `shepherd quickstart` will open the dashboard with the guide selected
-so it can walk you through sending a follow-up, reattaching, workstreams,
-and persistent notes.
+The guide's first lesson is a complete round trip. Press `Ctrl-b`, release both
+keys, then press `d`; `shepherd quickstart` opens the dashboard with the guide
+selected. `Up` and `Down` select rows, and empty `Enter` attaches the selected
+session. To reply before reattaching, press `Space` on the empty composer, type
+the message, and press `Enter`. A successful reply automatically returns the
+composer to new-session mode—do not press `Esc`, because an otherwise empty
+`Esc` parks the selection on Ungrouped. Press empty `Enter` to re-enter the
+still-selected Quickstart session.
+
+The tour then creates an outcome-oriented workstream, writes sample notes,
+handoff, and QA files into its artifact directory so their dashboard rendering
+is visible, and explains multiple roots, native status, durable human titles,
+and optional ephemeral automatic titles.
 
 ## Use it
 

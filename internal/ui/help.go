@@ -91,18 +91,18 @@ func (m Model) renderHelp() string {
 func (m Model) helpContentLines() []string {
 	var lines []string
 	lines = appendHelpParagraph(lines, m.width,
-		"Shepherd—‘parallel’ in Japanese—is a local command center for parallel native coding agents. Workstreams provide durable organization while tmux owns terminals and current process observation. Closing the dashboard never stops a runtime.")
+		"Shepherd is a local command center for parallel native coding agents. Operate it directly here or ask an LLM to use the same guarded CLI. Workstreams provide durable organization while tmux owns terminals and current process observation. Closing the dashboard never stops a runtime.")
 
 	lines = appendHelpSection(lines, m.width, "Nouns")
 	for _, item := range []struct {
 		term        string
 		description string
 	}{
-		{"Workstream", "A durable project grouping with a name, registered roots, notes and artifacts, and zero or more sessions. It does not imply a manager or autonomy."},
+		{"Workstream", "A durable logical bundle for one outcome, with a name, registered roots, notes and artifacts, and zero or more sessions. Development, testing, QA, and review may all belong to it; it does not imply a manager or autonomy."},
 		{"Session", "A durable launch identity with an optional title, initial task, root, runner, and recorded outcome. It remains after its process stops."},
 		{"Runtime", "The tmux pane currently associated with a session. It supplies live process observations and may be live, retained after exit, or unavailable."},
-		{"Root", "An explicitly registered directory used as the working directory for a new launch. A workstream may have several."},
-		{"Runner", "The native program Shepherd launches: Codex, Claude, or a no-agent interactive shell."},
+		{"Root", "An explicitly registered directory route used as the working directory for a new launch. Several roots let one workstream span repositories."},
+		{"Runner", "The native program Shepherd launches: Codex, Claude, or a no-agent interactive shell. Codex and Claude commands may target compatible wrappers or variants."},
 		{"Composer", "The input bar at the bottom of the dashboard. Its prefix names the destination Enter commits to: a new session, or the live session it is aimed at."},
 		{"Brief", m.briefGlossaryDescription()},
 		{"Ungrouped", "Durable sessions that currently have no workstream membership."},

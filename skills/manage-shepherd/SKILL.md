@@ -8,6 +8,20 @@ description: Operate Shepherd itself through the `shepherd` CLI — create and r
 Complete command reference for the Shepherd pilot. The operating rules live in
 `AGENTS.md` next to this file; this document is the surface.
 
+Shepherd may be operated directly through its dashboard or managed by an LLM
+through these commands. Both surfaces act on the same topology:
+
+```text
+workstream: one outcome or bundle of related work
+├── roots: registered directory routes where sessions may start
+├── sessions: durable launches, each using one root and runner
+└── artifact_dir: notes.md and other persistent shared files
+```
+
+A workstream is not a pipeline stage. It can bundle development, testing, QA,
+and PR-feedback sessions for one feature, even when those sessions launch into
+different repositories. Membership never moves files or registers a root.
+
 Every command accepts `--json` for a machine-readable result and `--socket` to
 target a non-default tmux socket. Workstreams and sessions may be named by full
 id, id prefix, or — for workstreams — name or name prefix. An ambiguous prefix
@@ -47,6 +61,12 @@ result, not a success. `native_status`, when present, is a bounded ephemeral
 line the runner published. It is not stored in durable state and must not be
 reconstructed from `peek` output when absent.
 
+The dashboard may also show an optional automatic title. It is off by default,
+requires `OPENAI_API_KEY`, makes one GPT-5.6 Luna call from the first completed
+turn, and exists only in that dashboard process. It is not returned as a
+durable title, must never be written back to state automatically, and always
+yields to a title the user set.
+
 ## Workstreams
 
 A new installation is seeded once with `shepherd-managers`, rooted only at the
@@ -65,9 +85,10 @@ not a delete, but it is not reversible through the CLI either.
 
 ## Roots
 
-A root is a directory a workstream may launch agents into. Registering one never
-touches the filesystem, and editing roots never rewrites the root recorded on
-sessions that already launched.
+A root is Shepherd's name for a directory route a workstream may launch agents
+into. A workstream may register several roots to coordinate one outcome across
+repositories. Registering one never touches the filesystem, and editing roots
+never rewrites the root recorded on sessions that already launched.
 
 ```sh
 shepherd ws root add WORKSTREAM DIR
@@ -118,6 +139,11 @@ there with ordinary file edits. The dashboard previews it below the list
 whenever that workstream is selected. The preview is cached against the
 selection, so a user parked on the row will not see your write until they press
 `F3` or move off the row and back.
+
+Use other files and shallow subdirectories when the work benefits from shared
+plans, QA checklists, handoffs, or generated artifacts. These files belong to
+the workstream rather than to any one runner conversation and are rendered in
+the same dashboard file tree.
 
 Notes are not state mutations. Do not route them through `shepherd`.
 

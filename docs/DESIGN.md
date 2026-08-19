@@ -19,6 +19,13 @@ substrate. New sessions also install bounded runner-native status publishers;
 richer orchestration remains a future caller of the same controller actions,
 not a prerequisite for using the dashboard.
 
+A workstream is an outcome-oriented bundle rather than a pipeline node. It owns
+one or more registered directory roots, any number of durable sessions launched
+through those routes, and a local artifact directory for shared notes and
+files. This lets development, testing, QA, and review sessions span multiple
+repositories while remaining one piece of work. Humans and future authorized
+LLM callers operate that same topology through the same controller actions.
+
 ## Research synthesis
 
 ### Claude Code Agent view
